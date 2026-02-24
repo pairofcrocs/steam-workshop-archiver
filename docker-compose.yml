@@ -1,0 +1,13 @@
+services:
+  steam-archiver:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./meta:/meta               # point this at your fast cache drive
+      - ./downloads:/downloads     # point this at your Unraid array
+    environment:
+      - TZ=America/New_York        # set your timezone — affects cron schedule times
+      - PUID=99                    # UID of the user that should own created files (Unraid: 99)
+      - PGID=100                   # GID of the group that should own created files (Unraid: 100)
+    restart: unless-stopped

@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Steam Workshop Archiver</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #1b2838;
+    --bg-dark:  #171a21;
+    --border:   #2a475e;
+    --accent:   #66c0f4;
+    --accent2:  #4a90c4;
+    --input-bg: #316282;
+    --text:     #c6d4df;
+    --text-dim: #7ba3bd;
+    --green:    #4caf82;
+    --red:      #e05d5d;
+    --yellow:   #e0a030;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- Header ---- */
+  header {
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.3px;
+  }
+  header .subtitle {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  /* ---- Main layout ---- */
+  main {
+    flex: 1;
+    padding: 24px 28px;
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* ---- Section cards ---- */
+  .card {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .card-header {
+    background: var(--border);
+    padding: 9px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .card-header-flex { display: flex; align-items: center; gap: 10px; }
+  .card-body {
+    padding: 16px 20px;
+  }
+
+  /* ---- Form ---- */
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 24px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .form-group.full {
+    grid-column: 1 / -1;
+  }
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  input[type="text"],
+  input[type="number"] {
+    padding: 8px 12px;
+    background: var(--input-bg);
+    border: 1px solid var(--accent2);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input[type="text"]:focus,
+  input[type="number"]:focus { border-color: var(--accent); }
+  input[type="text"]::placeholder { color: var(--text-dim); }
+  input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* ---- Checkboxes / radios ---- */
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .check-row input[type="checkbox"],
+  .check-row input[type="radio"] {
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+  }
+  .check-row span { font-size: 13px; }
+  .radio-group {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  /* ---- Delay range inputs ---- */
+  .delay-row { display: flex; gap: 8px; align-items: center; }
+  .delay-row input { flex: 1; }
+  .delay-row input::-webkit-outer-spin-button,
+  .delay-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .delay-row input[type=number] { -moz-appearance: textfield; }
+  .delay-sep { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+
+  /* ---- Buttons ---- */
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 9px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s, opacity 0.15s;
+    letter-spacing: 0.3px;
+  }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:not(:disabled):hover { filter: brightness(1.15); }
+  .btn-primary   { background: var(--accent); color: #0d1620; }
+  .btn-danger    { background: var(--red);   color: #fff; }
+  .btn-ghost,
+  .btn-secondary { background: var(--border); color: var(--text); }
+
+  /* ---- Status badge ---- */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .status-badge.idle    { background: #253444; color: var(--text-dim); }
+  .status-badge.running { background: #1d3a2f; color: var(--green); }
+  .status-badge.done    { background: #1d3a2f; color: var(--green); }
+  .status-badge.error   { background: #3a1d1d; color: var(--red); }
+  .dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .dot.pulse {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.15; }
+  }
+
+  /* ---- Log terminal ---- */
+  .log-wrap {
+    background: #0d1117;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    height: 380px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    scroll-behavior: smooth;
+  }
+  .log-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .log-line.error  { color: var(--red); }
+  .log-line.warn   { color: var(--yellow); }
+  .log-line.ok     { color: var(--green); }
+  .log-line.dim    { color: var(--text-dim); }
+  .log-empty { color: var(--text-dim); font-style: italic; }
+
+  /* ---- Job result links ---- */
+  .result-links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+  }
+  .btn-link {
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: filter 0.15s;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-link:hover { filter: brightness(1.2); }
+  .btn-link.html { background: var(--accent); color: #0d1620; }
+  .btn-link.csv  { background: var(--border); color: var(--text); }
+  .btn-link.action { background: rgba(102,192,244,0.15); color: var(--accent); }
+  .btn-link.del    { background: rgba(224,93,93,0.12);  color: var(--red); }
+
+  /* ---- Archives / Saved jobs ---- */
+  .archive-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .archive-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 14px;
+    background: #1b2838;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    transition: border-color 0.15s;
+  }
+  .archive-item:hover { border-color: var(--accent2); }
+  .archive-item-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .archive-name {
+    font-size: 13px;
+    color: var(--text);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .archive-appid {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: monospace;
+    background: var(--border);
+    padding: 2px 7px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .archive-links { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+  .archive-schedule {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .archive-empty { color: var(--text-dim); font-size: 13px; font-style: italic; }
+
+  /* ---- Edit job modal ---- */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-card {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: min(500px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+    animation: modal-fade .15s ease;
+  }
+  @keyframes modal-fade { from { opacity:0; transform:scale(.97) translateY(8px); } to { opacity:1; transform:none; } }
+  .modal-card-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .modal-card-body {
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .modal-card-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .modal-card-footer .spacer { flex: 1; }
+  .modal-field-row { display: flex; gap: 10px; align-items: center; }
+  select.field-select {
+    padding: 8px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--accent2);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    width: 100%;
+  }
+  select.field-select:focus { border-color: var(--accent); }
+
+  /* ---- Info bar ---- */
+  .info-bar {
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    padding: 10px 0 0;
+  }
+  .info-bar span { display: flex; align-items: center; gap: 5px; }
+
+  /* ---- Game search autocomplete ---- */
+  .search-box-wrap {
+    position: relative;
+  }
+  .search-box-wrap input { width: 100%; }
+  .search-spinner {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .search-box-wrap.loading .search-spinner { display: block; }
+  @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+  .search-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #253444;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 100;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .search-dropdown li {
+    padding: 7px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .search-dropdown li:hover,
+  .search-dropdown li.active { background: var(--input-bg); }
+  .search-dropdown .result-name { flex: 1; color: #fff; font-size: 13px; }
+  .search-dropdown .result-id   { font-size: 11px; color: var(--text-dim); font-family: monospace; }
+  .search-dropdown img           { width: 40px; height: 22px; object-fit: cover; border-radius: 2px; flex-shrink: 0; }
+  .search-no-results { padding: 8px 12px; color: var(--text-dim); font-size: 12px; font-style: italic; }
+
+  /* ---- Confirm bar ---- */
+  .confirm-bar {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 14px;
+    background: #1d3a2f;
+    border: 1px solid var(--green);
+    border-radius: 4px;
+  }
+  .confirm-bar-text {
+    color: var(--green);
+    font-size: 13px;
+    flex: 1;
+  }
+
+  /* ---- Hidden utility ---- */
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 384 384" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path fill="var(--accent2)" d="M216.75.39c4.2,1.78,7.59,4.22,8.81,9.12l10.75,43.44c8.6,2.89,15.51,5.7,23.78,9.99l34.59-20.52c4.49-2.67,10.16-1.69,13.8,1.94l31.08,30.98c4.26,4.25,4.8,9.92,1.74,15.02l-20.02,33.37c4.06,8.17,7.14,15.27,10.05,24.04l43.52,10.76c4.94,1.22,7.46,4.6,9.15,8.88v49.18c-1.74,4.43-4.54,8.06-9.76,9.03l-42.75,10.55c-2.93,8.15-5.89,15.42-9.94,23.5l20.09,33.57c2.62,4.38,2.14,10.11-1.55,13.79l-31.71,31.69c-3.41,3.4-9.19,4.52-13.46,1.98l-33.79-20.09c-8.37,4.26-16.18,7.51-24.88,10.57l-10.85,43.92c-1.55,4.83-5.58,8.5-10.92,8.49l-45.62-.06c-5.29,0-9.07-4.34-10.37-8.99l-10.7-43.34c-8.5-3.01-16.12-6.12-24.33-10.27l-32.99,19.61c-4.47,2.66-10.26,1.68-13.87-1.92l-31.46-31.41c-3.81-3.81-4.32-9.6-1.58-14.17l19.37-32.36c-4.07-8.15-7.29-15.9-10.35-24.5l-43.4-10.71c-4.94-1.08-7.35-4.65-9.15-8.77v-49.4c1.78-4.2,4.24-7.57,9.15-8.78l43.33-10.7c2.75-7.55,5.51-14.32,8.91-21.67l-21.51-35.94c-2.78-4.64-2.56-10.45,1.39-14.39l31.78-31.71c3.77-3.76,9.21-3.97,13.74-1.64l35.45,21.2c8.49-4.28,16.1-7.68,25.46-10.7l10.77-43.47c1.22-4.91,4.56-7.36,8.78-9.14h49.5ZM301.51,192c0-60.36-49.03-109.29-109.51-109.29s-109.51,48.93-109.51,109.29,49.03,109.29,109.51,109.29,109.51-48.93,109.51-109.29Z"/>
+    <path fill="var(--accent)" d="M218.99,110.58c2.37.97,3.84,2.63,3.84,5.45v82.11c0,2.2,1.67,3.91,3.8,3.92l26.33.02c2.21,0,4.01,1.37,4.7,3.1.77,1.95.4,3.99-1.16,5.55l-60.89,60.88c-1.96,1.96-5.04,2.17-7.05.16l-61.21-61.2c-1.56-1.56-1.71-3.78-.9-5.62.73-1.64,2.48-2.87,4.61-2.87l26.33-.02c2.18,0,3.93-1.58,3.93-3.9v-81.82c0-2.89,1.25-4.62,3.7-5.76h53.98Z"/>
+  </svg>
+  <h1>Steam Workshop Archiver</h1>
+  <span class="subtitle">powered by SteamCMD</span>
+</header>
+
+<main>
+
+  <!-- ── Job Form ── -->
+  <div class="card" id="form-card">
+    <div class="card-header">New Archive Job</div>
+    <div class="card-body">
+      <form id="job-form" autocomplete="off">
+        <div class="form-grid">
+
+          <div class="form-group full">
+            <label for="game-search">Game</label>
+            <div class="search-box-wrap" id="search-box-wrap">
+              <input id="game-search" type="text" placeholder="Type a game name to search…" autocomplete="off">
+              <div class="search-spinner"></div>
+              <ul id="search-dropdown" class="search-dropdown hidden"></ul>
+            </div>
+            <span class="hint">Only shows games with Steam Workshop support</span>
+          </div>
+          <input type="hidden" id="appid" name="appid">
+
+          <div class="form-group">
+            <label for="sort-main">Browse Sort</label>
+            <select id="sort-main" class="field-select">
+              <option value="popular">Most Popular</option>
+              <option value="mostrecent">Most Recent</option>
+              <option value="lastupdated">Last Updated</option>
+              <option value="totaluniquesubscribers">Most Subscribed</option>
+              <option value="random">Random</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="sort-timerange-wrap">
+            <label for="sort-timerange">Time Range</label>
+            <select id="sort-timerange" class="field-select">
+              <option value="today">Today</option>
+              <option value="week" selected>One Week</option>
+              <option value="month">Thirty Days</option>
+              <option value="3months">Three Months</option>
+              <option value="6months">Six Months</option>
+              <option value="year">One Year</option>
+              <option value="alltime">All Time</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="pages">Pages to scrape</label>
+            <input id="pages" name="pages" type="text" value="all" placeholder="all">
+            <span class="hint">Each page is ~30 items. Enter a number or "all".</span>
+          </div>
+
+          <div class="form-group">
+            <label>Request delay (seconds)</label>
+            <div class="delay-row">
+              <input id="delay-min" name="delay_min" type="number" value="1.0" min="0" step="0.1" title="Minimum delay">
+              <span class="delay-sep">to</span>
+              <input id="delay-max" name="delay_max" type="number" value="2.5" min="0" step="0.1" title="Maximum delay">
+            </div>
+            <span class="hint">Random delay between min &amp; max — be respectful to Steam's servers</span>
+          </div>
+
+          <div class="form-group full">
+            <label>Options</label>
+            <label class="check-row">
+              <input type="checkbox" id="fetch-sizes">
+              <span>Calculate file size before downloading</span>
+            </label>
+          </div>
+
+        </div><!-- /form-grid -->
+
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary" id="start-btn">&#9654; Start Archiving</button>
+          <button type="button" class="btn btn-secondary" id="save-btn">&#128190; Save Job</button>
+          <button type="button" class="btn btn-danger hidden" id="cancel-btn">&#9632; Stop Running Job</button>
+        </div>
+
+
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Job Log ── -->
+  <div class="card hidden" id="log-card">
+    <div class="card-header card-header-flex">
+      <span>Job Log</span>
+      <span id="status-badge" class="status-badge idle">
+        <span class="dot" id="status-dot"></span>
+        <span id="status-text">Idle</span>
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="log-wrap" id="log-output">
+        <span class="log-empty">Waiting for job to start...</span>
+      </div>
+      <div id="confirm-bar" class="confirm-bar hidden">
+        <span class="confirm-bar-text">&#10003; Size calculated — ready to start the download.</span>
+        <button type="button" class="btn btn-primary" id="proceed-btn" onclick="confirmDownload()">&#9654; Proceed with Download</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Downloaded Workshop Items ── -->
+  <div class="card" id="downloads-card">
+    <div class="card-header">Downloaded Workshop Items</div>
+    <div class="card-body">
+      <ul class="archive-list" id="downloads-list">
+        <li class="archive-empty">Loading...</li>
+      </ul>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Edit Saved Job Modal ── -->
+<div id="edit-modal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-card-header" id="edit-modal-title">Edit Saved Job</div>
+    <div class="modal-card-body">
+      <input type="hidden" id="edit-job-id">
+      <input type="hidden" id="edit-job-appid">
+      <input type="hidden" id="edit-job-game-name">
+
+      <div class="modal-field-row">
+        <div class="form-group" style="flex:1">
+          <label for="edit-sort-main">Browse Sort</label>
+          <select id="edit-sort-main" class="field-select">
+            <option value="popular">Most Popular</option>
+            <option value="mostrecent">Most Recent</option>
+            <option value="lastupdated">Last Updated</option>
+            <option value="totaluniquesubscribers">Most Subscribed</option>
+            <option value="random">Random</option>
+          </select>
+        </div>
+        <div class="form-group" id="edit-sort-timerange-wrap" style="flex:1">
+          <label for="edit-sort-timerange">Time Range</label>
+          <select id="edit-sort-timerange" class="field-select">
+            <option value="today">Today</option>
+            <option value="week">One Week</option>
+            <option value="month">Thirty Days</option>
+            <option value="3months">Three Months</option>
+            <option value="6months">Six Months</option>
+            <option value="year">One Year</option>
+            <option value="alltime">All Time</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="edit-pages">Pages to scrape</label>
+        <input id="edit-pages" type="text" placeholder="all">
+        <span class="hint">Each page is ~30 items. Enter a number or "all".</span>
+      </div>
+
+      <div class="form-group">
+        <label>Request delay (seconds)</label>
+        <div class="delay-row">
+          <input id="edit-delay-min" type="number" min="0" step="0.1" title="Min delay">
+          <span class="delay-sep">to</span>
+          <input id="edit-delay-max" type="number" min="0" step="0.1" title="Max delay">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="edit-schedule-type">Auto-refresh schedule</label>
+        <select id="edit-schedule-type" class="field-select">
+          <option value="none">Manual only — no auto-refresh</option>
+          <option value="interval">Interval — every N hours</option>
+          <option value="cron">Cron expression</option>
+        </select>
+      </div>
+
+      <div id="edit-schedule-value-wrap" class="form-group hidden">
+        <label id="edit-schedule-value-label" for="edit-schedule-value">Hours</label>
+        <input id="edit-schedule-value" type="text" placeholder="24">
+        <span id="edit-schedule-value-hint" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="modal-card-footer">
+      <button type="button" class="btn btn-danger" id="edit-delete-btn">&#128465; Delete</button>
+      <div class="spacer"></div>
+      <button type="button" class="btn" style="background:var(--border);color:var(--text)" id="edit-cancel-btn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="edit-save-btn">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------------------------------------------------------------------------
+  // DOM refs
+  // ---------------------------------------------------------------------------
+  const form        = document.getElementById('job-form');
+  const startBtn    = document.getElementById('start-btn');
+  const cancelBtn   = document.getElementById('cancel-btn');
+  const logCard     = document.getElementById('log-card');
+  const logOutput   = document.getElementById('log-output');
+  const statusBadge = document.getElementById('status-badge');
+  const statusDot   = document.getElementById('status-dot');
+  const statusText  = document.getElementById('status-text');
+  const downloadsList = document.getElementById('downloads-list');
+  const gameSearch  = document.getElementById('game-search');
+  const searchDropdown = document.getElementById('search-dropdown');
+  const appidInput  = document.getElementById('appid');
+
+  let eventSource    = null;
+  let searchTimeout  = null;
+  let currentGameName = '';
+
+  // ---------------------------------------------------------------------------
+  // Sort key helpers
+  // ---------------------------------------------------------------------------
+  function getSortKey() {
+    const main = document.getElementById('sort-main').value;
+    if (main === 'popular') {
+      return 'trend_' + document.getElementById('sort-timerange').value;
+    }
+    return main;
+  }
+
+  function setSortKey(sortKey) {
+    if (!sortKey || sortKey.startsWith('trend_')) {
+      document.getElementById('edit-sort-main').value = 'popular';
+      const range = sortKey ? sortKey.slice(6) : 'week';  // strip "trend_"
+      document.getElementById('edit-sort-timerange').value = range;
+      document.getElementById('edit-sort-timerange-wrap').style.display = '';
+    } else {
+      document.getElementById('edit-sort-main').value = sortKey;
+      document.getElementById('edit-sort-timerange-wrap').style.display = 'none';
+    }
+  }
+
+  document.getElementById('sort-main').addEventListener('change', function () {
+    const wrap = document.getElementById('sort-timerange-wrap');
+    wrap.style.display = this.value === 'popular' ? '' : 'none';
+  });
+
+  document.getElementById('edit-sort-main').addEventListener('change', function () {
+    document.getElementById('edit-sort-timerange-wrap').style.display =
+      this.value === 'popular' ? '' : 'none';
+  });
+
+  // ---------------------------------------------------------------------------
+  // Game search autocomplete
+  // ---------------------------------------------------------------------------
+  gameSearch.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    const q = gameSearch.value.trim();
+    if (!q) { searchDropdown.classList.add('hidden'); return; }
+    searchTimeout = setTimeout(() => fetchSearchResults(q), 300);
+  });
+
+  async function fetchSearchResults(q) {
+    const wrap = document.getElementById('search-box-wrap');
+    wrap.classList.add('loading');
+    try {
+      const res  = await fetch('/api/search?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      renderDropdown(data);
+    } catch (_) {
+      searchDropdown.classList.add('hidden');
+    } finally {
+      wrap.classList.remove('loading');
+    }
+  }
+
+  function renderDropdown(results) {
+    searchDropdown.innerHTML = '';
+    if (!results.length) {
+      const li = document.createElement('li');
+      li.className = 'search-no-results';
+      li.textContent = 'No games found';
+      searchDropdown.appendChild(li);
+      searchDropdown.classList.remove('hidden');
+      return;
+    }
+    results.forEach(r => {
+      const li = document.createElement('li');
+      if (r.logo || r.icon) {
+        const img = document.createElement('img');
+        img.src = r.logo || r.icon;
+        img.alt = '';
+        li.appendChild(img);
+      }
+      const name = document.createElement('span');
+      name.className = 'result-name';
+      name.textContent = r.name;
+      const id = document.createElement('span');
+      id.className = 'result-id';
+      id.textContent = r.appid;
+      li.appendChild(name);
+      li.appendChild(id);
+      li.addEventListener('mousedown', e => {
+        // mousedown fires before blur so the dropdown stays open long enough to register
+        e.preventDefault();
+        appidInput.value  = r.appid;
+        gameSearch.value  = r.name;
+        currentGameName   = r.name;
+        searchDropdown.classList.add('hidden');
+        appidInput.dispatchEvent(new Event('change'));
+      });
+      searchDropdown.appendChild(li);
+    });
+    searchDropdown.classList.remove('hidden');
+  }
+
+  // Close dropdown when focus leaves the search box
+  gameSearch.addEventListener('blur', () => {
+    setTimeout(() => searchDropdown.classList.add('hidden'), 150);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------------------
+  function formInputs() {
+    return form.querySelectorAll('input, button[type="submit"]');
+  }
+
+  function setFormDisabled(disabled) {
+    formInputs().forEach(el => el.disabled = disabled);
+  }
+
+  function setStatus(status) {
+    statusBadge.className = 'status-badge ' + status;
+    statusDot.className   = 'dot' + (status === 'running' ? ' pulse' : '');
+    const labels = { idle: 'Idle', running: 'Running', done: 'Done', error: 'Error' };
+    statusText.textContent = labels[status] || status;
+  }
+
+  function classifyLine(msg) {
+    const m = msg.toUpperCase();
+    if (m.includes('ERROR') || m.includes('FATAL')) return 'error';
+    if (m.includes('WARNING') || m.includes('WARN'))  return 'warn';
+    if (m.includes('COMPLETE') || m.includes('SAVED') || m.includes('DOWNLOADED')
+        || m.includes('--- JOB COMPLETE ---'))         return 'ok';
+    if (m.startsWith('  STEAMCMD:'))                   return 'dim';
+    return '';
+  }
+
+  function appendLog(msg) {
+    // Remove placeholder
+    const empty = logOutput.querySelector('.log-empty');
+    if (empty) empty.remove();
+
+    const ts  = new Date().toTimeString().slice(0, 8);
+    const cls = classifyLine(msg);
+    const line = document.createElement('div');
+    line.className = 'log-line' + (cls ? ' ' + cls : '');
+    line.textContent = ts + '  ' + msg;
+    logOutput.appendChild(line);
+    logOutput.scrollTop = logOutput.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Downloads list (merged: saved jobs + downloaded items)
+  // ---------------------------------------------------------------------------
+  async function loadDownloads() {
+    try {
+      const [workshopRes, savedRes] = await Promise.all([
+        fetch('/api/workshop'),
+        fetch('/api/saved-jobs'),
+      ]);
+      const workshopData = await workshopRes.json();
+      const savedJobs    = await savedRes.json();
+
+      downloadsList.innerHTML = '';
+
+      // Build lookup maps
+      const workshopMap = {};
+      workshopData.forEach(w => { workshopMap[w.appid] = w; });
+      const savedAppids = new Set(savedJobs.map(j => j.appid));
+
+      // Merge: saved jobs first, then downloads without a saved job
+      const items = [];
+      savedJobs.forEach(j => items.push({ savedJob: j, workshop: workshopMap[j.appid] || null }));
+      workshopData.forEach(w => { if (!savedAppids.has(w.appid)) items.push({ savedJob: null, workshop: w }); });
+
+      if (!items.length) {
+        downloadsList.innerHTML = '<li class="archive-empty">No downloaded content yet. Run a job to get started.</li>';
+        return;
+      }
+
+      items.forEach(({ savedJob, workshop }) => downloadsList.appendChild(buildArchiveItem(savedJob, workshop)));
+    } catch (err) {
+      downloadsList.innerHTML = '<li class="archive-empty">Could not load downloads.</li>';
+    }
+  }
+
+  function buildArchiveItem(savedJob, workshop) {
+    const li  = document.createElement('li');
+    li.className = 'archive-item';
+
+    const row = document.createElement('div');
+    row.className = 'archive-item-row';
+
+    // Name
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'archive-name';
+    nameSpan.textContent = savedJob
+      ? (savedJob.game_name || savedJob.appid)
+      : (workshop.game_name || `App ${workshop.appid}`);
+    row.appendChild(nameSpan);
+
+    // Badge (item count + size)
+    if (workshop) {
+      const badge = document.createElement('span');
+      badge.className   = 'archive-appid';
+      badge.textContent = workshop.item_count + ' items · ' + workshop.total_size_formatted;
+      row.appendChild(badge);
+    }
+
+    // Action buttons
+    const links = document.createElement('div');
+    links.className = 'archive-links';
+
+    if (savedJob) {
+      const refreshBtn = document.createElement('button');
+      refreshBtn.className = 'btn-link action';
+      refreshBtn.textContent = '↻ Refresh';
+      refreshBtn.addEventListener('click', () => refreshJob(savedJob.id));
+      links.appendChild(refreshBtn);
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn-link csv';
+      editBtn.textContent = '✎ Edit';
+      editBtn.addEventListener('click', () => openEditModal(savedJob));
+      links.appendChild(editBtn);
+    } else if (workshop) {
+      const saveTaskBtn = document.createElement('button');
+      saveTaskBtn.className = 'btn-link action';
+      saveTaskBtn.textContent = '☆ Save Task';
+      saveTaskBtn.addEventListener('click', () => saveAsTask(workshop, saveTaskBtn));
+      links.appendChild(saveTaskBtn);
+    }
+
+    if (workshop) {
+      const a = document.createElement('a');
+      a.className   = 'btn-link html';
+      a.href        = '/workshop/' + encodeURIComponent(workshop.appid);
+      a.textContent = 'Browse';
+      links.appendChild(a);
+    }
+
+    row.appendChild(links);
+    li.appendChild(row);
+
+    // Schedule / last-run row
+    if (savedJob) {
+      const schedLabel = scheduleLabel(savedJob);
+      const lastRun    = savedJob.last_run_at ? 'Last: ' + relativeTime(savedJob.last_run_at) : 'Never run';
+      const nextRun    = savedJob.next_run_at  ? ' · Next: ' + timeUntil(savedJob.next_run_at) : '';
+      const text       = schedLabel ? `${schedLabel} · ${lastRun}${nextRun}` : lastRun;
+
+      const schedDiv = document.createElement('div');
+      schedDiv.className   = 'archive-schedule';
+      schedDiv.textContent = text;
+      li.appendChild(schedDiv);
+    }
+
+    return li;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Saved job helpers
+  // ---------------------------------------------------------------------------
+  function scheduleLabel(job) {
+    if (job.schedule_type === 'interval') {
+      const h = parseFloat(job.schedule_value);
+      if (isNaN(h) || h <= 0) return null;
+      if (h % 24 === 0) return `Every ${h / 24}d`;
+      return `Every ${h}h`;
+    }
+    if (job.schedule_type === 'cron') return `Cron: ${job.schedule_value}`;
+    return null;
+  }
+
+  function relativeTime(ts) {
+    if (!ts) return 'never';
+    const diff = Date.now() / 1000 - ts;
+    if (diff < 60)    return 'just now';
+    if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  function timeUntil(ts) {
+    if (!ts) return null;
+    const diff = ts - Date.now() / 1000;
+    if (diff <= 0)    return 'overdue';
+    if (diff < 3600)  return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return `${Math.floor(diff / 86400)}d`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Save as task (from a completed unsaved download in the list)
+  // ---------------------------------------------------------------------------
+  async function saveAsTask(workshop, btn) {
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const res = await fetch('/api/saved-jobs', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appid:         workshop.appid,
+          game_name:     workshop.game_name || workshop.appid,
+          pages:         'all',
+          delay_min:     1.0,
+          delay_max:     2.5,
+          fetch_sizes:   false,
+          scrape_only:   false,
+          download_only: false,
+          schedule_type: 'none',
+          schedule_value: '',
+          sort_key:      'trend_week',
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      btn.textContent = '✓ Saved!';
+      setTimeout(() => loadDownloads(), 800);
+    } catch (err) {
+      btn.textContent = orig;
+      btn.disabled = false;
+      alert('Failed to save task: ' + err.message);
+    }
+  }
+
+// ---------------------------------------------------------------------------
+  // Save job (from main form)
+  // ---------------------------------------------------------------------------
+  async function saveJob() {
+    const appid = appidInput.value.trim();
+    if (!appid) { alert('Please search for and select a game first.'); return; }
+
+    const body = {
+      appid,
+      game_name:     currentGameName || gameSearch.value.trim() || appid,
+      pages:         document.getElementById('pages').value.trim() || 'all',
+      delay_min:     parseFloat(document.getElementById('delay-min').value) || 1.0,
+      delay_max:     parseFloat(document.getElementById('delay-max').value) || 2.5,
+      scrape_only:   false,
+      download_only: false,
+      schedule_type: 'none',
+      schedule_value: '',
+      sort_key:      getSortKey(),
+    };
+
+    const saveBtn = document.getElementById('save-btn');
+    try {
+      const res = await fetch('/api/saved-jobs', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const orig = saveBtn.textContent;
+      saveBtn.textContent = '✓ Saved!';
+      saveBtn.disabled = true;
+      setTimeout(() => { saveBtn.textContent = orig; saveBtn.disabled = false; }, 1500);
+      loadDownloads();
+    } catch (err) {
+      alert('Failed to save job: ' + err.message);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refresh (run a saved job now)
+  // ---------------------------------------------------------------------------
+  async function refreshJob(jobId) {
+    try {
+      const res = await fetch(`/api/saved-jobs/${jobId}/run`, { method: 'POST' });
+      if (res.status === 409) { alert('A job is already running. Please wait for it to finish.'); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      setFormDisabled(true);
+      startBtn.classList.add('hidden');
+      cancelBtn.classList.remove('hidden');
+      logCard.classList.remove('hidden');
+      logOutput.innerHTML = '<span class="log-empty">Connecting...</span>';
+      setStatus('running');
+      connectStream();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      alert('Failed to start refresh: ' + err.message);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Edit modal
+  // ---------------------------------------------------------------------------
+  function openEditModal(savedJob) {
+    document.getElementById('edit-job-id').value        = savedJob.id;
+    document.getElementById('edit-job-appid').value     = savedJob.appid;
+    document.getElementById('edit-job-game-name').value = savedJob.game_name || '';
+    document.getElementById('edit-modal-title').textContent = `Edit: ${savedJob.game_name || savedJob.appid}`;
+
+    document.getElementById('edit-pages').value     = savedJob.pages || 'all';
+    document.getElementById('edit-delay-min').value = savedJob.delay_min ?? 1.0;
+    document.getElementById('edit-delay-max').value = savedJob.delay_max ?? 2.5;
+    setSortKey(savedJob.sort_key || 'trend_week');
+
+    const schedType = savedJob.schedule_type || 'none';
+    document.getElementById('edit-schedule-type').value  = schedType;
+    document.getElementById('edit-schedule-value').value = savedJob.schedule_value || '';
+    updateScheduleValueUI(schedType);
+
+    document.getElementById('edit-modal').classList.remove('hidden');
+  }
+
+  function closeEditModal() {
+    document.getElementById('edit-modal').classList.add('hidden');
+  }
+
+  function updateScheduleValueUI(type) {
+    const wrap  = document.getElementById('edit-schedule-value-wrap');
+    const label = document.getElementById('edit-schedule-value-label');
+    const hint  = document.getElementById('edit-schedule-value-hint');
+    const input = document.getElementById('edit-schedule-value');
+
+    if (type === 'none') {
+      wrap.classList.add('hidden');
+    } else if (type === 'interval') {
+      wrap.classList.remove('hidden');
+      label.textContent = 'Every (hours)';
+      hint.textContent  = 'e.g. 24 for daily, 168 for weekly';
+      input.placeholder = '24';
+      input.type        = 'number';
+      input.min         = '1';
+      input.step        = '1';
+    } else if (type === 'cron') {
+      wrap.classList.remove('hidden');
+      label.textContent = 'Cron expression';
+      hint.textContent  = 'Standard 5-field cron, e.g. "0 2 * * *" (daily at 2 am)';
+      input.placeholder = '0 2 * * *';
+      input.type        = 'text';
+      input.removeAttribute('min');
+      input.removeAttribute('step');
+    }
+  }
+
+  function validateSchedule(schedType, schedValue) {
+    if (schedType === 'interval') {
+      const v = parseFloat(schedValue);
+      if (!schedValue.trim() || isNaN(v) || v <= 0)
+        return 'Interval must be a positive number of hours (e.g. "24").';
+    } else if (schedType === 'cron') {
+      const cronRe = /^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$/;
+      if (!cronRe.test(schedValue.trim()))
+        return 'Cron expression must have exactly 5 fields (e.g. "0 3 * * *").';
+    }
+    return null;
+  }
+
+  async function saveEditModal() {
+    const jobId     = document.getElementById('edit-job-id').value;
+    const schedType = document.getElementById('edit-schedule-type').value;
+    const schedValue = document.getElementById('edit-schedule-value').value.trim();
+
+    const schedErr = validateSchedule(schedType, schedValue);
+    if (schedErr) { alert(schedErr); return; }
+
+    const editSortMain = document.getElementById('edit-sort-main').value;
+    const editSortKey  = editSortMain === 'popular'
+      ? 'trend_' + document.getElementById('edit-sort-timerange').value
+      : editSortMain;
+
+    const body = {
+      appid:          document.getElementById('edit-job-appid').value,
+      game_name:      document.getElementById('edit-job-game-name').value,
+      pages:          document.getElementById('edit-pages').value.trim() || 'all',
+      delay_min:      parseFloat(document.getElementById('edit-delay-min').value) || 1.0,
+      delay_max:      parseFloat(document.getElementById('edit-delay-max').value) || 2.5,
+      scrape_only:    false,
+      download_only:  false,
+      schedule_type:  schedType,
+      schedule_value: schedValue,
+      sort_key:       editSortKey,
+    };
+
+    try {
+      const res = await fetch(`/api/saved-jobs/${jobId}`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      closeEditModal();
+      loadDownloads();
+    } catch (err) {
+      alert('Failed to save changes: ' + err.message);
+    }
+  }
+
+  async function deleteJob(jobId) {
+    if (!confirm('Delete this saved job? Downloaded files are not affected.')) return;
+    try {
+      const res = await fetch(`/api/saved-jobs/${jobId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      closeEditModal();
+      loadDownloads();
+    } catch (err) {
+      alert('Failed to delete job: ' + err.message);
+    }
+  }
+
+  // Edit modal event listeners
+  document.getElementById('save-btn').addEventListener('click', saveJob);
+  document.getElementById('edit-cancel-btn').addEventListener('click', closeEditModal);
+  document.getElementById('edit-save-btn').addEventListener('click', saveEditModal);
+  document.getElementById('edit-delete-btn').addEventListener('click', () =>
+    deleteJob(document.getElementById('edit-job-id').value)
+  );
+  document.getElementById('edit-schedule-type').addEventListener('change', e =>
+    updateScheduleValueUI(e.target.value)
+  );
+  document.getElementById('edit-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('edit-modal')) closeEditModal();
+  });
+
+  // ---------------------------------------------------------------------------
+  // SSE stream
+  // ---------------------------------------------------------------------------
+  function connectStream() {
+    if (eventSource) { eventSource.close(); eventSource = null; }
+
+    eventSource = new EventSource('/jobs/stream');
+
+    eventSource.onmessage = e => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { return; }
+
+      if (data.type === 'log') {
+        appendLog(data.message);
+      } else if (data.type === 'confirm') {
+        showConfirmBar();
+      } else if (data.type === 'done') {
+        eventSource.close();
+        eventSource = null;
+
+        hideConfirmBar();
+        const status = data.status;
+        setStatus(status);
+        setFormDisabled(false);
+        startBtn.classList.remove('hidden');
+        cancelBtn.disabled = false;
+        cancelBtn.classList.add('hidden');
+
+        if (status !== 'done') {
+          appendLog('Job ended with status: ' + status);
+        }
+
+        loadDownloads();
+      }
+    };
+
+    eventSource.onerror = () => {
+      // Connection closed — check if the job is still running
+      if (eventSource) { eventSource.close(); eventSource = null; }
+      setTimeout(async () => {
+        try {
+          const res  = await fetch('/jobs/status');
+          const data = await res.json();
+          if (data.status === 'running') {
+            connectStream();
+            if (data.waiting_confirm) showConfirmBar();
+          } else {
+            hideConfirmBar();
+            setStatus(data.status);
+            setFormDisabled(false);
+            startBtn.classList.remove('hidden');
+            cancelBtn.disabled = false;
+            cancelBtn.classList.add('hidden');
+            loadDownloads();
+          }
+        } catch (_) { /* ignore */ }
+      }, 1000);
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Form submission
+  // ---------------------------------------------------------------------------
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+
+    const appid = appidInput.value.trim();
+    if (!appid) { alert('Please search for and select a game first.'); return; }
+
+    const rawMin = parseFloat(document.getElementById('delay-min').value) || 1.0;
+    const rawMax = parseFloat(document.getElementById('delay-max').value) || 2.5;
+
+    const body = {
+      appid,
+      pages:         document.getElementById('pages').value.trim() || 'all',
+      delay_min:     Math.min(rawMin, rawMax),
+      delay_max:     Math.max(rawMin, rawMax),
+      fetch_sizes:   document.getElementById('fetch-sizes').checked,
+      scrape_only:   false,
+      download_only: false,
+      sort_key:      getSortKey(),
+    };
+
+    // Disable form, show log panel
+    setFormDisabled(true);
+    startBtn.classList.add('hidden');
+    cancelBtn.classList.remove('hidden');
+    logCard.classList.remove('hidden');
+    logOutput.innerHTML = '<span class="log-empty">Connecting...</span>';
+    setStatus('running');
+
+    try {
+      const res = await fetch('/jobs/start', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to start job.');
+      }
+
+      logOutput.innerHTML = '';
+      connectStream();
+
+    } catch (err) {
+      appendLog('ERROR: ' + err.message);
+      setStatus('error');
+      setFormDisabled(false);
+      startBtn.classList.remove('hidden');
+      cancelBtn.disabled = false;
+      cancelBtn.classList.add('hidden');
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cancel
+  // ---------------------------------------------------------------------------
+  cancelBtn.addEventListener('click', async () => {
+    cancelBtn.disabled = true;
+    try {
+      await fetch('/jobs/cancel', { method: 'POST' });
+      appendLog('Cancellation requested...');
+    } catch (_) {
+      cancelBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // On page load: check if a job is already running (e.g. after page refresh)
+  // ---------------------------------------------------------------------------
+  (async () => {
+    await loadDownloads();
+
+    try {
+      const res  = await fetch('/jobs/status');
+      const data = await res.json();
+
+      if (data.status === 'running') {
+        setFormDisabled(true);
+        startBtn.classList.add('hidden');
+        cancelBtn.classList.remove('hidden');
+        logCard.classList.remove('hidden');
+        setStatus('running');
+        appendLog('Reconnecting to running job...');
+        connectStream();
+        if (data.waiting_confirm) showConfirmBar();
+      }
+    } catch (_) { /* ignore */ }
+  })();
+
+  // ---------------------------------------------------------------------------
+  // Confirm download
+  // ---------------------------------------------------------------------------
+  function showConfirmBar() {
+    const bar = document.getElementById('confirm-bar');
+    bar.classList.remove('hidden');
+    document.getElementById('proceed-btn').disabled = false;
+    document.getElementById('proceed-btn').textContent = '\u25B6 Proceed with Download';
+  }
+
+  function hideConfirmBar() {
+    document.getElementById('confirm-bar').classList.add('hidden');
+  }
+
+  async function confirmDownload() {
+    const btn = document.getElementById('proceed-btn');
+    btn.disabled = true;
+    btn.textContent = '\u2026';
+    try {
+      const res = await fetch('/jobs/confirm', { method: 'POST' });
+      if (!res.ok) throw new Error();
+      hideConfirmBar();
+    } catch (_) {
+      btn.disabled = false;
+      btn.textContent = '\u25B6 Proceed with Download';
+    }
+  }
+</script>
+</body>
+</html>

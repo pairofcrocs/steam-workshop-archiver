@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(du:*)",
+      "WebFetch(domain:steamcommunity.com)",
+      "WebFetch(domain:store.steampowered.com)",
+      "Bash(curl:*)",
+      "Bash(git -C /w/software/docker/steam-workshop-archiver status)"
+    ]
+  }
+}

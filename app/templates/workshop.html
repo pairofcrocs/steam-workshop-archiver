@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workshop Browser</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:          #1b2838;
+    --bg-dark:     #171a21;
+    --bg-card:     #16202d;
+    --border:      #2a475e;
+    --accent:      #66c0f4;
+    --accent2:     #4a90c4;
+    --input-bg:    #316282;
+    --text:        #c6d4df;
+    --text-dim:    #7ba3bd;
+    --text-bright: #ffffff;
+    --red:         #e05d5d;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .back-btn {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 11px;
+    border-radius: 4px;
+    background: var(--border);
+    transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .back-btn:hover { color: var(--text-bright); background: var(--input-bg); }
+  .back-btn.danger { color: var(--red); }
+  .back-btn.danger:hover { background: var(--red); color: #fff; }
+  .header-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+  .header-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-bright);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .header-stats { font-size: 12px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+  .header-stats strong { color: var(--accent); }
+
+  /* ── Main ── */
+  main {
+    flex: 1;
+    padding: 20px 28px;
+    max-width: 1300px;
+    width: 100%;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  #search {
+    flex: 1;
+    min-width: 180px;
+    max-width: 340px;
+    padding: 8px 13px;
+    background: var(--input-bg);
+    border: 1px solid var(--accent2);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #search:focus { border-color: var(--accent); }
+  #search::placeholder { color: var(--text-dim); }
+
+  .tag-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag-btn {
+    padding: 5px 13px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tag-btn:hover { border-color: var(--accent2); color: var(--text); }
+  .tag-btn.active { background: var(--accent); border-color: var(--accent); color: #0d1620; font-weight: 600; }
+
+  .sort-select {
+    padding: 7px 11px;
+    background: var(--input-bg);
+    border: 1px solid var(--accent2);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    margin-left: auto;
+  }
+  .sort-select:focus { border-color: var(--accent); }
+
+  /* ── Count bar ── */
+  .count-bar { font-size: 12px; color: var(--text-dim); }
+  .count-bar strong { color: var(--text); }
+
+  /* ── Card grid ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 18px;
+  }
+
+  .item-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    display: flex;
+    flex-direction: column;
+  }
+  .item-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--accent2);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  }
+
+  .card-img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--border) 0%, var(--bg) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.3s;
+  }
+  .item-card:hover .card-img img { transform: scale(1.04); }
+  .card-img-ph { font-size: 44px; opacity: 0.6; }
+
+  .card-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-bright);
+    line-height: 1.3;
+  }
+  .card-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+  .tag-chip {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(102,192,244,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(102,192,244,0.25);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .card-size {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .card-size strong { color: var(--text); }
+  .card-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* ── Load-more button ── */
+  .load-more-wrap {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: center;
+    padding: 16px 0 8px;
+  }
+  .load-more-btn {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    border-radius: 4px;
+    padding: 9px 28px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s;
+  }
+  .load-more-btn:hover { filter: brightness(1.2); }
+
+  /* ── No results / loading ── */
+  .status-msg {
+    text-align: center;
+    padding: 64px 20px;
+    color: var(--text-dim);
+    font-size: 14px;
+    font-style: italic;
+    grid-column: 1 / -1;
+  }
+  .status-msg.error { color: var(--red); font-style: normal; }
+  .hidden { display: none !important; }
+
+  /* ── Modal ── */
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.78);
+    backdrop-filter: blur(5px);
+  }
+  .modal-box {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    max-width: 700px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.65);
+    animation: modal-in 0.18s ease;
+  }
+  @keyframes modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(12px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0); }
+  }
+  .modal-banner {
+    width: 100%;
+    max-height: 280px;
+    object-fit: cover;
+    display: block;
+    border-radius: 7px 7px 0 0;
+  }
+  .modal-banner-ph {
+    width: 100%;
+    height: 200px;
+    background: linear-gradient(135deg, var(--border) 0%, var(--bg-dark) 100%);
+    border-radius: 7px 7px 0 0;
+  }
+  .modal-body { padding: 20px 24px 26px; display: flex; flex-direction: column; gap: 12px; }
+  .modal-title-row { display: flex; align-items: flex-start; gap: 12px; }
+  .modal-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-bright);
+    flex: 1;
+    line-height: 1.25;
+  }
+  .modal-close {
+    background: var(--border);
+    border: none;
+    color: var(--text-dim);
+    font-size: 20px;
+    line-height: 1;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+  }
+  .modal-close:hover { background: var(--red); color: #fff; }
+  .modal-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-meta span { display: flex; align-items: center; gap: 5px; }
+  .modal-meta strong { color: var(--text); }
+  .modal-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .modal-dl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    background: var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s;
+    align-self: flex-start;
+  }
+  .modal-dl-btn:hover { background: var(--input-bg); color: var(--text-bright); }
+  .modal-del-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    background: transparent;
+    color: var(--red);
+    border: 1px solid var(--red);
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    align-self: flex-start;
+    opacity: 0.75;
+  }
+  .modal-del-btn:hover { background: var(--red); color: #fff; opacity: 1; }
+
+  .modal-desc {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .modal-desc a { color: var(--accent); }
+  .modal-desc strong, .modal-desc b { color: var(--text-bright); }
+  .modal-desc em, .modal-desc i { color: var(--text-dim); }
+
+  /* ── Game hero banner ── */
+  .game-hero {
+    position: relative;
+    height: 230px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .game-hero-bg {
+    position: absolute;
+    inset: 0;
+    background-color: #0d1520;
+    background-size: cover;
+    background-position: center 20%;
+  }
+  .game-hero-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to bottom,
+      rgba(27,40,56,0.18) 0%,
+      rgba(27,40,56,0.55) 55%,
+      var(--bg) 100%
+    );
+  }
+  .game-logo {
+    position: absolute;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-height: 115px;
+    max-width: 52%;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 18px rgba(0,0,0,0.85));
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* ── Scrollbars ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--input-bg); }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    main { padding: 14px 16px; }
+    header { padding: 11px 16px; }
+    .card-grid { grid-template-columns: 1fr; }
+    .sort-select { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="back-btn">&#8592; Archiver</a>
+  <div class="header-sep"></div>
+  <svg width="20" height="20" viewBox="0 0 384 384" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="flex-shrink:0">
+    <path fill="var(--accent2)" d="M216.75.39c4.2,1.78,7.59,4.22,8.81,9.12l10.75,43.44c8.6,2.89,15.51,5.7,23.78,9.99l34.59-20.52c4.49-2.67,10.16-1.69,13.8,1.94l31.08,30.98c4.26,4.25,4.8,9.92,1.74,15.02l-20.02,33.37c4.06,8.17,7.14,15.27,10.05,24.04l43.52,10.76c4.94,1.22,7.46,4.6,9.15,8.88v49.18c-1.74,4.43-4.54,8.06-9.76,9.03l-42.75,10.55c-2.93,8.15-5.89,15.42-9.94,23.5l20.09,33.57c2.62,4.38,2.14,10.11-1.55,13.79l-31.71,31.69c-3.41,3.4-9.19,4.52-13.46,1.98l-33.79-20.09c-8.37,4.26-16.18,7.51-24.88,10.57l-10.85,43.92c-1.55,4.83-5.58,8.5-10.92,8.49l-45.62-.06c-5.29,0-9.07-4.34-10.37-8.99l-10.7-43.34c-8.5-3.01-16.12-6.12-24.33-10.27l-32.99,19.61c-4.47,2.66-10.26,1.68-13.87-1.92l-31.46-31.41c-3.81-3.81-4.32-9.6-1.58-14.17l19.37-32.36c-4.07-8.15-7.29-15.9-10.35-24.5l-43.4-10.71c-4.94-1.08-7.35-4.65-9.15-8.77v-49.4c1.78-4.2,4.24-7.57,9.15-8.78l43.33-10.7c2.75-7.55,5.51-14.32,8.91-21.67l-21.51-35.94c-2.78-4.64-2.56-10.45,1.39-14.39l31.78-31.71c3.77-3.76,9.21-3.97,13.74-1.64l35.45,21.2c8.49-4.28,16.1-7.68,25.46-10.7l10.77-43.47c1.22-4.91,4.56-7.36,8.78-9.14h49.5ZM301.51,192c0-60.36-49.03-109.29-109.51-109.29s-109.51,48.93-109.51,109.29,49.03,109.29,109.51,109.29,109.51-48.93,109.51-109.29Z"/>
+    <path fill="var(--accent)" d="M218.99,110.58c2.37.97,3.84,2.63,3.84,5.45v82.11c0,2.2,1.67,3.91,3.8,3.92l26.33.02c2.21,0,4.01,1.37,4.7,3.1.77,1.95.4,3.99-1.16,5.55l-60.89,60.88c-1.96,1.96-5.04,2.17-7.05.16l-61.21-61.2c-1.56-1.56-1.71-3.78-.9-5.62.73-1.64,2.48-2.87,4.61-2.87l26.33-.02c2.18,0,3.93-1.58,3.93-3.9v-81.82c0-2.89,1.25-4.62,3.7-5.76h53.98Z"/>
+  </svg>
+  <span class="header-title" id="header-title">Loading&#8230;</span>
+  <span class="header-stats" id="header-stats"></span>
+  <button id="fetch-meta-btn" class="back-btn" onclick="fetchMeta()">&#8635; Fetch Metadata</button>
+  <button id="del-archive-btn" class="back-btn danger">&#128465; Delete Archive</button>
+</header>
+
+<section id="game-hero" class="game-hero hidden">
+  <div id="game-hero-bg" class="game-hero-bg"></div>
+  <div class="game-hero-overlay"></div>
+  <img id="game-logo" class="game-logo hidden" alt="">
+</section>
+
+<main>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search by title&#8230;" autofocus>
+    <div id="tag-filters" class="tag-filters"></div>
+    <select id="sort-select" class="sort-select">
+      <option value="title-asc">Name A &#8594; Z</option>
+      <option value="title-desc">Name Z &#8594; A</option>
+      <option value="size-desc" selected>Largest first</option>
+      <option value="size-asc">Smallest first</option>
+      <option value="date-desc">Newest first</option>
+      <option value="date-asc">Oldest first</option>
+    </select>
+  </div>
+
+  <div id="count-bar" class="count-bar"></div>
+
+  <div id="card-grid" class="card-grid">
+    <div class="status-msg">Loading workshop items&#8230;</div>
+  </div>
+</main>
+
+<!-- Modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-backdrop" id="modal-backdrop"></div>
+  <div class="modal-box">
+    <img id="modal-banner" class="modal-banner hidden" alt="">
+    <div id="modal-banner-ph" class="modal-banner-ph"></div>
+    <div class="modal-body">
+      <div class="modal-title-row">
+        <h2 class="modal-title" id="modal-title"></h2>
+        <button class="modal-close" id="modal-close" aria-label="Close">&#10005;</button>
+      </div>
+      <div id="modal-tags" class="card-tags"></div>
+      <div class="modal-meta" id="modal-meta"></div>
+      <div class="modal-actions">
+        <a id="modal-dl-btn" class="modal-dl-btn" href="#" download>
+          &#128229; Download Archive (.zip)
+        </a>
+        <a id="modal-steam-btn" class="modal-dl-btn" href="#" target="_blank" rel="noopener noreferrer">
+          &#128279; View on Steam
+        </a>
+        <button id="modal-del-btn" class="modal-del-btn">&#128465; Delete</button>
+      </div>
+      <div class="modal-desc" id="modal-desc"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const APPID = "{{ appid }}";
+  const PAGE_SIZE = 100;
+  let allItems = [];
+  let _currentFiltered = [];
+  let _renderedCount = 0;
+  let activeTags = new Set();
+  let _modalItem = null;
+
+  // ── Data loading ─────────────────────────────────────────────────────────────
+  async function load() {
+    try {
+      const res = await fetch(`/api/workshop/${APPID}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      allItems = data.items;
+
+      document.title = `${data.game_name} — Workshop Browser`;
+      document.getElementById('header-title').textContent = `${data.game_name}`;
+      document.getElementById('header-stats').innerHTML =
+        `<strong>${data.items.length}</strong> items &nbsp;·&nbsp; <strong>${data.total_size_formatted}</strong>`;
+
+      buildTagFilters();
+      renderCards();
+    } catch (err) {
+      document.getElementById('card-grid').innerHTML =
+        `<div class="status-msg error">Failed to load workshop data: ${err.message}</div>`;
+    }
+  }
+
+  // ── Tag filters ──────────────────────────────────────────────────────────────
+  function buildTagFilters() {
+    const allTags = new Set();
+    allItems.forEach(item => item.tags.forEach(t => allTags.add(t)));
+    const container = document.getElementById('tag-filters');
+    container.innerHTML = '';
+    if (!allTags.size) return;
+
+    const allBtn = mkTagBtn('All', '', true);
+    allBtn.addEventListener('click', () => {
+      activeTags.clear();
+      syncTagButtons();
+      renderCards();
+    });
+    container.appendChild(allBtn);
+
+    [...allTags].sort().forEach(tag => {
+      const btn = mkTagBtn(tag, tag, false);
+      btn.addEventListener('click', () => {
+        activeTags.has(tag) ? activeTags.delete(tag) : activeTags.add(tag);
+        syncTagButtons();
+        renderCards();
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  function mkTagBtn(label, tag, active) {
+    const btn = document.createElement('button');
+    btn.className = 'tag-btn' + (active ? ' active' : '');
+    btn.textContent = label;
+    btn.dataset.tag = tag;
+    return btn;
+  }
+
+  function syncTagButtons() {
+    document.querySelectorAll('.tag-btn').forEach(btn => {
+      btn.classList.toggle('active',
+        btn.dataset.tag === '' ? activeTags.size === 0 : activeTags.has(btn.dataset.tag)
+      );
+    });
+  }
+
+  // ── Filtering & sorting ──────────────────────────────────────────────────────
+  function getFiltered() {
+    const q = document.getElementById('search').value.toLowerCase().trim();
+    return allItems.filter(item => {
+      if (q && !item.title.toLowerCase().includes(q)) return false;
+      if (activeTags.size > 0 && !item.tags.some(t => activeTags.has(t))) return false;
+      return true;
+    });
+  }
+
+  function getSorted(items) {
+    const val = document.getElementById('sort-select').value;
+    return [...items].sort((a, b) => {
+      switch (val) {
+        case 'title-asc':  return a.title.localeCompare(b.title);
+        case 'title-desc': return b.title.localeCompare(a.title);
+        case 'size-desc':  return b.size - a.size;
+        case 'size-asc':   return a.size - b.size;
+        case 'date-desc':  return b.time_updated - a.time_updated;
+        case 'date-asc':   return a.time_updated - b.time_updated;
+        default: return 0;
+      }
+    });
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────────────────
+  function renderCards() {
+    _currentFiltered = getSorted(getFiltered());
+    _renderedCount = 0;
+    const grid = document.getElementById('card-grid');
+    const countBar = document.getElementById('count-bar');
+    grid.innerHTML = '';
+
+    if (!_currentFiltered.length) {
+      grid.innerHTML = '<div class="status-msg">No items match your search.</div>';
+      countBar.innerHTML = '';
+      return;
+    }
+
+    const total = allItems.length;
+    const shown = _currentFiltered.length;
+    countBar.innerHTML = shown === total
+      ? `Showing <strong>${total}</strong> item${total !== 1 ? 's' : ''}`
+      : `Showing <strong>${shown}</strong> of <strong>${total}</strong> items`;
+
+    _appendCards(grid);
+  }
+
+  function _appendCards(grid) {
+    const batch = _currentFiltered.slice(_renderedCount, _renderedCount + PAGE_SIZE);
+    batch.forEach(item => grid.appendChild(buildCard(item)));
+    _renderedCount += batch.length;
+
+    // Remove any existing load-more button before re-evaluating
+    const old = grid.querySelector('.load-more-wrap');
+    if (old) old.remove();
+
+    if (_renderedCount < _currentFiltered.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'load-more-wrap';
+      const btn = document.createElement('button');
+      btn.className = 'load-more-btn';
+      const remaining = _currentFiltered.length - _renderedCount;
+      btn.textContent = `Load more (${remaining} remaining)`;
+      btn.addEventListener('click', () => _appendCards(grid));
+      wrap.appendChild(btn);
+      grid.appendChild(wrap);
+    }
+  }
+
+  function buildCard(item) {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.addEventListener('click', () => openModal(item));
+
+    // Image
+    const imgWrap = document.createElement('div');
+    imgWrap.className = 'card-img';
+    if (item.has_preview) {
+      const img = document.createElement('img');
+      img.src = `/workshop-image/${APPID}/${item.id}/previewimage.png`;
+      img.alt = item.title;
+      img.loading = 'lazy';
+      imgWrap.appendChild(img);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 'card-img-ph';
+      ph.textContent = item.is_bin ? '📦' : '🗺';
+      imgWrap.appendChild(ph);
+    }
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'card-body';
+
+    const title = document.createElement('div');
+    title.className = 'card-title';
+    title.textContent = item.title;
+    body.appendChild(title);
+
+    if (item.tags.length) {
+      const tags = document.createElement('div');
+      tags.className = 'card-tags';
+      item.tags.forEach(t => tags.appendChild(mkChip(t)));
+      body.appendChild(tags);
+    }
+
+    const size = document.createElement('div');
+    size.className = 'card-size';
+    size.innerHTML = `<strong>${item.size_formatted}</strong>`;
+    body.appendChild(size);
+
+    const plain = stripBBCode(item.description);
+    if (plain) {
+      const desc = document.createElement('div');
+      desc.className = 'card-desc';
+      desc.textContent = plain;
+      body.appendChild(desc);
+    }
+
+    card.appendChild(imgWrap);
+    card.appendChild(body);
+    return card;
+  }
+
+  function mkChip(text) {
+    const el = document.createElement('span');
+    el.className = 'tag-chip';
+    el.textContent = text;
+    return el;
+  }
+
+  // ── Modal ────────────────────────────────────────────────────────────────────
+  function openModal(item) {
+    const bannerImg = document.getElementById('modal-banner');
+    const bannerPh  = document.getElementById('modal-banner-ph');
+
+    const bannerSrc = item.has_preview
+      ? `/workshop-image/${APPID}/${item.id}/previewimage.png`
+      : null;
+
+    if (bannerSrc) {
+      bannerImg.src = bannerSrc;
+      bannerImg.classList.remove('hidden');
+      bannerPh.classList.add('hidden');
+    } else {
+      bannerImg.classList.add('hidden');
+      bannerPh.classList.remove('hidden');
+    }
+
+    document.getElementById('modal-title').textContent = item.title;
+
+    const tagsEl = document.getElementById('modal-tags');
+    tagsEl.innerHTML = '';
+    item.tags.forEach(t => tagsEl.appendChild(mkChip(t)));
+
+    const dateStr = item.time_updated
+      ? new Date(item.time_updated * 1000).toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})
+      : null;
+
+    document.getElementById('modal-meta').innerHTML = [
+      `<span>&#128190; <strong>${item.size_formatted}</strong></span>`,
+      dateStr ? `<span>&#128197; Updated <strong>${dateStr}</strong></span>` : '',
+    ].filter(Boolean).join('');
+
+    const dlBtn = document.getElementById('modal-dl-btn');
+    dlBtn.href = `/workshop-download/${APPID}/${item.id}`;
+    dlBtn.innerHTML = item.is_bin
+      ? '&#128229; Download .bin File'
+      : '&#128229; Download Archive (.zip)';
+
+    document.getElementById('modal-steam-btn').href =
+      `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.id}`;
+
+    document.getElementById('modal-desc').innerHTML = item.description
+      ? renderBBCode(item.description, item.desc_image_map || {})
+      : item.has_metadata
+        ? '<em style="color:var(--text-dim)">No description available.</em>'
+        : '<em style="color:var(--text-dim)">Metadata not yet fetched — click <strong>Fetch Metadata</strong> in the header to load descriptions and tags.</em>';
+
+    _modalItem = item;
+    document.getElementById('modal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-backdrop').addEventListener('click', closeModal);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  document.getElementById('modal-del-btn').addEventListener('click', async () => {
+    if (!_modalItem) return;
+    const name = _modalItem.title || _modalItem.id;
+    if (!confirm(`Delete "${name}"?\n\nThe downloaded files will be permanently removed.`)) return;
+    try {
+      const res = await fetch(`/api/workshop/${APPID}/items/${encodeURIComponent(_modalItem.id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      allItems = allItems.filter(i => i.id !== _modalItem.id);
+      closeModal();
+      renderCards();
+      document.getElementById('header-stats').innerHTML =
+        `<strong>${allItems.length}</strong> items`;
+    } catch (err) {
+      alert(`Failed to delete: ${err.message}`);
+    }
+  });
+
+  // ── Delete entire archive ─────────────────────────────────────────────────────
+  document.getElementById('del-archive-btn').addEventListener('click', async () => {
+    const title = document.getElementById('header-title').textContent || APPID;
+    if (!confirm(`Delete the entire "${title}" archive?\n\nAll downloaded files will be permanently removed. Any saved task for this game is kept — delete it from the main page if needed.`)) return;
+    const btn = document.getElementById('del-archive-btn');
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const res = await fetch(`/api/workshop/${APPID}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.location.href = '/';
+    } catch (err) {
+      alert(`Failed to delete archive: ${err.message}`);
+      btn.disabled = false;
+      btn.textContent = '🗑 Delete Archive';
+    }
+  });
+
+  // ── BB code helpers ───────────────────────────────────────────────────────────
+  function stripBBCode(text) {
+    if (!text) return '';
+    return text
+      .replace(/\[img\].*?\[\/img\]/gis, '')
+      .replace(/\[url=.*?\](.*?)\[\/url\]/gis, '$1')
+      .replace(/\[.*?\]/gs, '')
+      .replace(/\r\n|\r/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function renderBBCode(raw, imageMap = {}) {
+    if (!raw) return '';
+    let t = raw
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    t = t
+      .replace(/\[img\](.*?)\[\/img\]/gis, (_, encodedUrl) => {
+        // Decode HTML entities so the map lookup matches the original URL
+        const rawUrl = encodedUrl.trim()
+          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        // imageMap values are local /api/... paths (safe); fallback is the
+        // already-HTML-escaped original URL. Sanitize double-quotes in src.
+        const src = (imageMap[rawUrl] || encodedUrl.trim()).replace(/"/g, '&quot;');
+        return `<img src="${src}" alt="" style="max-width:100%;border-radius:4px;display:block;margin:6px 0">`;
+      })
+      .replace(/\[url=(.*?)\](.*?)\[\/url\]/gis, (_, href, label) => {
+        // Decode entities and allow only http/https to prevent javascript: XSS
+        const decoded = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        const safe = /^https?:\/\//i.test(decoded.trim()) ? decoded.trim() : '#';
+        const escapedHref = safe.replace(/"/g, '&quot;');
+        return `<a href="${escapedHref}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+      })
+      .replace(/\[b\](.*?)\[\/b\]/gis, '<strong>$1</strong>')
+      .replace(/\[i\](.*?)\[\/i\]/gis, '<em>$1</em>')
+      .replace(/\[u\](.*?)\[\/u\]/gis, '<u>$1</u>')
+      .replace(/\[strike\](.*?)\[\/strike\]/gis, '<del>$1</del>')
+      .replace(/\[h1\](.*?)\[\/h1\]/gis, '<strong style="font-size:15px;display:block;margin-top:6px">$1</strong>')
+      .replace(/\[h2\](.*?)\[\/h2\]/gis, '<strong>$1</strong>')
+      .replace(/\[list\](.*?)\[\/list\]/gis, (_, content) => {
+        // Split on [*] markers and wrap each non-empty piece in <li>...</li>
+        const items = content.split(/\[\*\]/i)
+          .map(s => s.trim())
+          .filter(s => s.length > 0)
+          .map(s => `<li>${s}</li>`)
+          .join('');
+        return `<ul style="padding-left:18px;margin:6px 0;list-style:disc">${items}</ul>`;
+      })
+      .replace(/\[\*\]/gis, '')  // stray [*] outside a [list]
+      .replace(/\[.*?\]/gs, '')
+      .replace(/\r\n|\r|\n/g, '<br>');
+    return t;
+  }
+
+  // ── Fetch Metadata ───────────────────────────────────────────────────────────
+  async function fetchMeta() {
+    const btn = document.getElementById('fetch-meta-btn');
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const r = await fetch(`/api/workshop/${APPID}/fetch-metadata`, { method: 'POST' });
+      const d = await r.json();
+      btn.textContent = `Fetching ${d.item_count} items…`;
+      setTimeout(() => {
+        btn.innerHTML = '&#8635; Reload';
+        btn.disabled = false;
+        btn.onclick = () => location.reload();
+      }, 2000);
+    } catch (e) {
+      btn.innerHTML = '&#8635; Fetch Metadata';
+      btn.disabled = false;
+    }
+  }
+
+  // ── Game hero banner ─────────────────────────────────────────────────────────
+  function loadGameHero() {
+    const heroEl = document.getElementById('game-hero');
+    const heroBg = document.getElementById('game-hero-bg');
+    const logoEl = document.getElementById('game-logo');
+
+    function revealHero() { heroEl.classList.remove('hidden'); }
+
+    const heroSrc = `https://cdn.akamai.steamstatic.com/steam/apps/${APPID}/library_hero.jpg`;
+    const logoSrc = `https://cdn.akamai.steamstatic.com/steam/apps/${APPID}/logo.png`;
+
+    const heroTest = new Image();
+    heroTest.onload = () => {
+      heroBg.style.backgroundImage = `url('${heroSrc}')`;
+      revealHero();
+    };
+    heroTest.src = heroSrc;
+
+    const logoTest = new Image();
+    logoTest.onload = () => {
+      logoEl.src = logoSrc;
+      logoEl.classList.remove('hidden');
+      revealHero();
+    };
+    logoTest.src = logoSrc;
+  }
+
+  // ── Wire up controls ─────────────────────────────────────────────────────────
+  document.getElementById('search').addEventListener('input', renderCards);
+  document.getElementById('sort-select').addEventListener('change', renderCards);
+
+  loadGameHero();
+  load();
+</script>
+</body>
+</html>

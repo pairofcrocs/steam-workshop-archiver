@@ -2,7 +2,7 @@
 
 A self-hosted web app for archiving Steam Workshop content. Scrape item lists, download them via SteamCMD, browse your collection, and keep everything up to date with scheduled jobs — all from a browser.
 
-![Steam Workshop Archiver](https://img.shields.io/badge/docker-ready-blue) ![Python](https://img.shields.io/badge/python-3.10-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![Steam Workshop Archiver](https://img.shields.io/badge/docker-ready-blue) ![Python](https://img.shields.io/badge/python-3.10-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![License](https://img.shields.io/badge/license-Unlicense-lightgrey)
 
 > **Vibe coded.** This entire project was built with AI assistance — no traditional development process, no architectural planning sessions, no code reviews. Just vibes. It works, but don't expect enterprise-grade engineering. Use it, break it, fix it, have fun with it.
 
@@ -52,7 +52,7 @@ When starting a job you can choose how Workshop items are sorted during scraping
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/steam-workshop-archiver.git
+git clone https://github.com/pairofcrocs/steam-workshop-archiver.git
 cd steam-workshop-archiver
 ```
 
@@ -230,4 +230,4 @@ New downloads automatically trigger this step at the end of each job.
 
 ## License
 
-MIT
+[Unlicense](LICENSE) — public domain, no restrictions.

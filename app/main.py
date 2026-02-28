@@ -29,6 +29,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from . import __version__
 from .core.downloader import download_workshop_items
 from .core.scraper import scrape_workshop
 from .core.utils import (
@@ -425,6 +426,7 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
+        "version": __version__,
         "steamcmd_path": STEAMCMD_PATH,
         "meta_dir": META_DIR,
         "downloads_dir": DOWNLOADS_DIR,

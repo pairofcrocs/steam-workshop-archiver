@@ -158,6 +158,7 @@ New downloads automatically trigger this step at the end of each job.
 | `META_DIR` | `/meta` | Path for metadata, CSVs, and cached images |
 | `DOWNLOADS_DIR` | `/downloads` | Path for SteamCMD workshop downloads |
 | `STEAMCMD_PATH` | `/opt/steamcmd/steamcmd.sh` | Path to the SteamCMD executable |
+| `AUTH_PASSWORD` | _(unset)_ | When set, enables HTTP Basic Auth on all routes. Leave unset for open LAN access. |
 
 > **Unraid users:** Set `PUID=99` and `PGID=100` (the `nobody`/`users` defaults) so all files written to your shares are owned by the correct user and you can manage them without permission errors.
 

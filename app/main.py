@@ -1,11 +1,13 @@
 """FastAPI application — Steam Workshop Archiver web UI."""
 
 import asyncio
+import base64
 import csv
 import json
 import os
 import queue
 import re
+import secrets
 import shutil
 import time
 import uuid
@@ -23,7 +25,9 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import Response
 
 from .core.downloader import download_workshop_items
 from .core.scraper import scrape_workshop
@@ -46,6 +50,7 @@ STEAMCMD_PATH = os.environ.get("STEAMCMD_PATH", "/opt/steamcmd/steamcmd.sh")
 META_DIR        = os.environ.get("META_DIR", "/meta")
 DOWNLOADS_DIR   = os.environ.get("DOWNLOADS_DIR", "/downloads")
 SAVED_JOBS_FILE = os.path.join(META_DIR, "saved_jobs.json")
+AUTH_PASSWORD   = os.environ.get("AUTH_PASSWORD", "")
 
 # ---------------------------------------------------------------------------
 # Saved-jobs helpers
@@ -127,6 +132,25 @@ async def lifespan(app_instance: FastAPI):
 app = FastAPI(title="Steam Workshop Archiver", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+if AUTH_PASSWORD:
+    class _BasicAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Basic "):
+                try:
+                    decoded = base64.b64decode(auth[6:]).decode("utf-8")
+                    _, pwd = decoded.split(":", 1)
+                    if secrets.compare_digest(pwd.encode(), AUTH_PASSWORD.encode()):
+                        return await call_next(request)
+                except Exception:
+                    pass
+            return Response(
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="Steam Workshop Archiver"'},
+                content="Unauthorized",
+            )
+    app.add_middleware(_BasicAuthMiddleware)
 
 
 # ---------------------------------------------------------------------------

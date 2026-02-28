@@ -11,7 +11,7 @@ A self-hosted web app for archiving Steam Workshop content. Scrape item lists, d
 | ![Workshop Browser — Portal 2](screenshots/browser-portal2.png) | ![Workshop Browser — CoD BO3](screenshots/browser-bo3.png) |
 | ![Item Detail](screenshots/item-detail.png) | ![Edit Job](screenshots/edit-job.png) |
 
-> **Vibe coded.** This entire project was built with AI assistance — no traditional development process, no architectural planning sessions, no code reviews. Just vibes. It works, but don't expect enterprise-grade engineering. Use it, break it, fix it, have fun with it.
+> **Vibe coded.** This is a vibe-coded project from start to finish. AI-assisted, minimal planning, zero ceremony. Functionally, it’s just a lightweight wrapper around SteamCMD with an archive browsing interface. It’s meant to be useful, not over-engineered.
 
 ---
 

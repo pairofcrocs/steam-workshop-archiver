@@ -4,6 +4,13 @@ A self-hosted web app for archiving Steam Workshop content. Scrape item lists, d
 
 ![Steam Workshop Archiver](https://img.shields.io/badge/docker-ready-blue) ![Python](https://img.shields.io/badge/python-3.10-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![License](https://img.shields.io/badge/license-Unlicense-lightgrey)
 
+![Dashboard](screenshots/dashboard.png)
+
+| | |
+|---|---|
+| ![Workshop Browser — Portal 2](screenshots/browser-portal2.png) | ![Workshop Browser — CoD BO3](screenshots/browser-bo3.png) |
+| ![Item Detail](screenshots/item-detail.png) | ![Edit Job](screenshots/edit-job.png) |
+
 > **Vibe coded.** This entire project was built with AI assistance — no traditional development process, no architectural planning sessions, no code reviews. Just vibes. It works, but don't expect enterprise-grade engineering. Use it, break it, fix it, have fun with it.
 
 ---
@@ -34,12 +41,6 @@ When starting a job you can choose how Workshop items are sorted during scraping
 | **Last Updated** | — |
 | **Most Subscribed** | — |
 | **Random** | Scrapes all-time items and shuffles the results before saving |
-
----
-
-## Screenshots
-
-> _Add your own screenshots here._
 
 ---
 

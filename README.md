@@ -1,4 +1,4 @@
-# Steam Workshop Archiver
+![swa](https://github.com/user-attachments/assets/2ef39db4-421d-4942-ae09-b860d9890894)
 
 A self-hosted web app for archiving Steam Workshop content. Scrape item lists, download them via SteamCMD, browse your collection, and keep everything up to date with scheduled jobs — all from a browser.
 

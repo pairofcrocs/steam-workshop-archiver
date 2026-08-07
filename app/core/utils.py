@@ -9,6 +9,7 @@ import os
 import re
 import tempfile
 import threading
+from dataclasses import dataclass, field
 from urllib.parse import urlparse, parse_qs
 
 import requests
@@ -131,6 +132,230 @@ SESSION = make_session()
 # ---------------------------------------------------------------------------
 def csv_path(meta_dir: str, appid: str) -> str:
     return os.path.join(meta_dir, "games", appid, "data.csv")
+
+
+def workshop_content_dir(downloads_dir: str, appid: str) -> str:
+    """Path to SteamCMD workshop content for an app."""
+    return os.path.join(downloads_dir, "steamapps", "workshop", "content", appid)
+
+
+def is_item_downloaded(downloads_dir: str, appid: str, item_id: str) -> bool:
+    """True if workshop item content already exists locally."""
+    content_dir = workshop_content_dir(downloads_dir, appid)
+    return (
+        os.path.isdir(os.path.join(content_dir, item_id))
+        or os.path.isfile(os.path.join(content_dir, f"{item_id}.bin"))
+    )
+
+
+def appworkshop_acf_path(downloads_dir: str, appid: str) -> str:
+    """Path to the SteamCMD appworkshop ACF manifest for an app."""
+    return os.path.join(downloads_dir, "steamapps", "workshop", f"appworkshop_{appid}.acf")
+
+
+_ACF_ITEM_RE = re.compile(r'"(\d+)"\s*\{([^}]+)\}')
+_ACF_SIZE_RE = re.compile(r'"size"\s+"(\d+)"')
+_ACF_TIME_RE = re.compile(r'"timeupdated"\s+"(\d+)"')
+
+
+def _acf_vdf_block(text: str, key: str) -> str:
+    """Return the inner body of a brace-delimited VDF section, or ""."""
+    marker = f'"{key}"'
+    idx = text.find(marker)
+    if idx == -1:
+        return ""
+    brace = text.find("{", idx)
+    if brace == -1:
+        return ""
+    depth = 0
+    for pos in range(brace, len(text)):
+        ch = text[pos]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace + 1: pos]
+    return ""
+
+
+def parse_acf_items(acf_path: str) -> dict[str, dict]:
+    """Return {item_id: {size, timeupdated}} from a SteamCMD appworkshop .acf file."""
+    try:
+        with open(acf_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return {}
+
+    section = _acf_vdf_block(text, "WorkshopItemsInstalled")
+    if not section:
+        return {}
+
+    result: dict[str, dict] = {}
+    for m in _ACF_ITEM_RE.finditer(section):
+        item_id, block = m.group(1), m.group(2)
+        size_m = _ACF_SIZE_RE.search(block)
+        time_m = _ACF_TIME_RE.search(block)
+        result[item_id] = {
+            "size": int(size_m.group(1)) if size_m else 0,
+            "timeupdated": int(time_m.group(1)) if time_m else 0,
+        }
+    return result
+
+
+def workshop_item_disk_size(entry_path: str, *, is_dir: bool, is_bin: bool) -> int:
+    """Return on-disk byte size for a workshop item directory or .bin file."""
+    if is_bin:
+        try:
+            return os.path.getsize(entry_path)
+        except OSError:
+            return 0
+    if not is_dir:
+        return 0
+    total = 0
+    for root, _, files in os.walk(entry_path):
+        for fname in files:
+            try:
+                total += os.path.getsize(os.path.join(root, fname))
+            except OSError:
+                pass
+    return total
+
+
+def resolve_workshop_item_size(
+    entry_path: str,
+    *,
+    is_dir: bool,
+    is_bin: bool,
+    acf_item: dict,
+    api_meta: dict,
+) -> int:
+    """Resolve display/download size: ACF, then API metadata, then disk."""
+    size = int(acf_item.get("size", 0) or 0)
+    if size:
+        return size
+    size = int(api_meta.get("file_size", 0) or 0)
+    if size:
+        return size
+    return workshop_item_disk_size(entry_path, is_dir=is_dir, is_bin=is_bin)
+
+
+def load_workshop_metadata_times(meta_dir: str, appid: str) -> dict[str, int]:
+    """Return {item_id: time_updated} from the cached Steam API metadata file."""
+    metadata_file = os.path.join(meta_dir, "games", appid, "metadata.json")
+    try:
+        with open(metadata_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    times: dict[str, int] = {}
+    for item_id, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            times[item_id] = int(entry.get("time_updated", 0) or 0)
+        except (TypeError, ValueError):
+            times[item_id] = 0
+    return times
+
+
+@dataclass
+class DownloadVerifySnapshot:
+    """Filesystem state captured before a SteamCMD download attempt."""
+
+    preexisting: set[str] = field(default_factory=set)
+    acf_state: dict[str, dict] = field(default_factory=dict)
+    bin_mtime: dict[str, float] = field(default_factory=dict)
+
+
+def take_verify_snapshot(
+    downloads_dir: str,
+    appid: str,
+    item_ids: list[str],
+) -> DownloadVerifySnapshot:
+    """Record which items already exist and their ACF / .bin timestamps."""
+    content_dir = workshop_content_dir(downloads_dir, appid)
+    preexisting: set[str] = set()
+    bin_mtime: dict[str, float] = {}
+
+    for item_id in item_ids:
+        item_dir = os.path.join(content_dir, item_id)
+        bin_path = os.path.join(content_dir, f"{item_id}.bin")
+        if os.path.isdir(item_dir):
+            preexisting.add(item_id)
+        elif os.path.isfile(bin_path):
+            preexisting.add(item_id)
+            bin_mtime[item_id] = os.path.getmtime(bin_path)
+
+    return DownloadVerifySnapshot(
+        preexisting=preexisting,
+        acf_state=parse_acf_items(appworkshop_acf_path(downloads_dir, appid)),
+        bin_mtime=bin_mtime,
+    )
+
+
+def workshop_item_satisfied(
+    workshop_id: str,
+    snapshot: DownloadVerifySnapshot,
+    downloads_dir: str,
+    appid: str,
+    api_time_updated: int = 0,
+) -> bool:
+    """
+    Return True when a download attempt can be considered successful.
+
+    - New items must appear on disk.
+    - Pre-existing items must have been updated this run (ACF or .bin mtime),
+      or already match the workshop's published time_updated from API metadata.
+    """
+    if not is_item_downloaded(downloads_dir, appid, workshop_id):
+        return False
+
+    if workshop_id not in snapshot.preexisting:
+        return True
+
+    acf_after = parse_acf_items(appworkshop_acf_path(downloads_dir, appid))
+    before = snapshot.acf_state.get(workshop_id, {})
+    after = acf_after.get(workshop_id, {})
+
+    before_time = int(before.get("timeupdated", 0) or 0)
+    after_time = int(after.get("timeupdated", 0) or 0)
+    before_size = int(before.get("size", 0) or 0)
+    after_size = int(after.get("size", 0) or 0)
+
+    if after_time > before_time or after_size != before_size:
+        return True
+
+    bin_path = os.path.join(workshop_content_dir(downloads_dir, appid), f"{workshop_id}.bin")
+    if workshop_id in snapshot.bin_mtime and os.path.isfile(bin_path):
+        if os.path.getmtime(bin_path) > snapshot.bin_mtime[workshop_id]:
+            return True
+
+    if api_time_updated > 0 and after_time >= api_time_updated:
+        return True
+
+    return False
+
+
+def verify_downloaded_items(
+    item_ids: list[str],
+    snapshot: DownloadVerifySnapshot,
+    downloads_dir: str,
+    appid: str,
+    api_times: dict[str, int],
+) -> set[str]:
+    """Return workshop IDs whose local state satisfies the download attempt."""
+    return {
+        workshop_id
+        for workshop_id in item_ids
+        if workshop_item_satisfied(
+            workshop_id,
+            snapshot,
+            downloads_dir,
+            appid,
+            api_times.get(workshop_id, 0),
+        )
+    }
 
 
 # ---------------------------------------------------------------------------

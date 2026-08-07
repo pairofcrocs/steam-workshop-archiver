@@ -39,6 +39,8 @@ from .core.utils import (
     fetch_and_cache_metadata,
     format_bytes,
     get_game_name,
+    parse_acf_items,
+    resolve_workshop_item_size,
 )
 
 # ---------------------------------------------------------------------------
@@ -389,6 +391,9 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
                 steamcmd_path=STEAMCMD_PATH,
                 appid=appid,
                 downloads_dir=DOWNLOADS_DIR,
+                meta_dir=META_DIR,
+                delay_min=req.delay_min,
+                delay_max=req.delay_max,
                 log_fn=log,
                 cancel_check=cancelled,
             )
@@ -584,39 +589,12 @@ def _require_numeric_id(value: str, label: str = "ID") -> None:
 # ---------------------------------------------------------------------------
 # Workshop browser helpers
 # ---------------------------------------------------------------------------
-_ACF_ITEM_RE = re.compile(r'"(\d+)"\s*\{([^}]+)\}')
-_ACF_SIZE_RE = re.compile(r'"size"\s+"(\d+)"')
-_ACF_TIME_RE = re.compile(r'"timeupdated"\s+"(\d+)"')
-
-
 def _safe_int(v) -> int:
     """Convert v to int safely; returns 0 on any failure."""
     try:
         return int(v or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def _parse_acf_items(acf_path: str) -> dict[str, dict]:
-    """Return {item_id: {size, timeupdated}} from a SteamCMD appworkshop .acf file."""
-    try:
-        with open(acf_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        installed = re.search(r'"WorkshopItemsInstalled"\s*\{(.*?)\n\t\}', text, re.DOTALL)
-        if not installed:
-            return {}
-        result: dict[str, dict] = {}
-        for m in _ACF_ITEM_RE.finditer(installed.group(1)):
-            item_id, block = m.group(1), m.group(2)
-            size_m = _ACF_SIZE_RE.search(block)
-            time_m = _ACF_TIME_RE.search(block)
-            result[item_id] = {
-                "size": int(size_m.group(1)) if size_m else 0,
-                "timeupdated": int(time_m.group(1)) if time_m else 0,
-            }
-        return result
-    except Exception:
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +615,7 @@ async def list_workshop_appids():
                 if e.is_dir() or e.name.endswith(".bin")
             )
             acf_path = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", f"appworkshop_{appid}.acf")
-            acf_data = _parse_acf_items(acf_path)
+            acf_data = parse_acf_items(acf_path)
             total_size = sum(v["size"] for v in acf_data.values())
             result.append({
                 "appid": appid,
@@ -657,7 +635,7 @@ async def workshop_items(appid: str):
     _require_numeric_id(appid, "App ID")
     content_dir = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", "content", appid)
     acf_path = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", f"appworkshop_{appid}.acf")
-    acf_data = _parse_acf_items(acf_path)
+    acf_data = parse_acf_items(acf_path)
     game_name = get_game_name(appid)
 
     # Load API metadata cache — single source for title/description/tags/time_updated
@@ -681,11 +659,15 @@ async def workshop_items(appid: str):
             item_id = entry_name[:-4] if is_bin else entry_name
             meta = api_meta.get(item_id, {})
 
-            # Size: ACF for directories (SteamCMD-tracked), disk for .bin files
+            # Size: ACF, then API metadata, then on-disk measurement
             acf_item = acf_data.get(item_id, {})
-            size = acf_item.get("size", 0)
-            if not size and is_bin:
-                size = os.path.getsize(entry_path)
+            size = resolve_workshop_item_size(
+                entry_path,
+                is_dir=is_dir,
+                is_bin=is_bin,
+                acf_item=acf_item,
+                api_meta=meta,
+            )
 
             # Preview: check both the local directory image and the API-fetched cache
             # so existing archives without a metadata run still show thumbnails

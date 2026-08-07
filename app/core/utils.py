@@ -2,7 +2,9 @@
 
 import csv
 import hashlib
+import html
 import json
+import math
 import os
 import re
 import tempfile
@@ -65,6 +67,21 @@ _DETAILS_BLOCK_PAT = re.compile(
 )
 _STAT_LABEL_PAT = re.compile(r'<div class="detailsStatLeft">(.*?)</div>', re.DOTALL)
 _STAT_VALUE_PAT = re.compile(r'<div class="detailsStatRight">(.*?)</div>', re.DOTALL)
+
+# Workshop browse page (React SSR redesign)
+_SSR_LOADER_RE = re.compile(r"window\.SSR\.loaderData = (\[.*?\]);", re.DOTALL)
+_WORKSHOP_LINK_RE = re.compile(
+    r'href="(https://steamcommunity\.com/sharedfiles/filedetails/\?id=\d+)"'
+)
+_WORKSHOP_AUTHOR_RE = re.compile(r">By ([^<]+)<")
+_STEAM_WORKSHOP_TITLE_RE = re.compile(
+    r"<title>The Steam Workshop for (.+?)</title>"
+)
+_LEGACY_GAME_NAME_RE = re.compile(
+    r'<div class="apphub_AppName ellipsis">\s*(.*?)\s*</div>'
+)
+# Steam caps workshop browse pagination at 1000 pages.
+_WORKSHOP_BROWSE_PAGE_CAP = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -133,17 +150,93 @@ def extract_workshop_id(url: str) -> str | None:
     return iid if iid.isdigit() else None
 
 
+def _parse_ssr_loader_parts(html_text: str) -> list | None:
+    """Return parsed SSR loaderData entries, or None if unavailable."""
+    match = _SSR_LOADER_RE.search(html_text)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+
+def game_name_from_browse_html(html_text: str) -> str:
+    """Extract the game name from a workshop browse page."""
+    parts = _parse_ssr_loader_parts(html_text)
+    if parts and len(parts) >= 2:
+        try:
+            header = json.loads(parts[1])
+            name = header.get("appHubHeader", {}).get("name")
+            if name:
+                return html.unescape(str(name).strip())
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+
+    match = _STEAM_WORKSHOP_TITLE_RE.search(html_text)
+    if match:
+        return html.unescape(match.group(1).strip())
+
+    match = _LEGACY_GAME_NAME_RE.search(html_text)
+    if match:
+        return html.unescape(match.group(1).strip())
+
+    return ""
+
+
+def parse_workshop_browse_meta(html_text: str) -> dict:
+    """Return browse pagination metadata from SSR loader data."""
+    parts = _parse_ssr_loader_parts(html_text)
+    if not parts or len(parts) < 3:
+        return {}
+
+    try:
+        query = json.loads(parts[2])
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+    total = int(query.get("workshopNumbers", {}).get("total") or 0)
+    per_page = int(query.get("serverQuery", {}).get("num_per_page") or 30)
+    if total <= 0 or per_page <= 0:
+        return {}
+
+    max_pages = min(math.ceil(total / per_page), _WORKSHOP_BROWSE_PAGE_CAP)
+    return {"total": total, "per_page": per_page, "max_pages": max_pages}
+
+
+def parse_workshop_browse_page(html_text: str) -> tuple[list[str], list[str], list[str]]:
+    """Return (titles, links, authors) from a workshop browse page."""
+    links = list(dict.fromkeys(_WORKSHOP_LINK_RE.findall(html_text)))
+    titles: list[str] = []
+    for link in links:
+        title_match = re.search(
+            rf'href="{re.escape(link)}"[^>]*><img[^>]*alt="([^"]*)"',
+            html_text,
+        )
+        titles.append(
+            html.unescape(title_match.group(1).strip()) if title_match else ""
+        )
+
+    authors = [
+        html.unescape(author.strip())
+        for author in _WORKSHOP_AUTHOR_RE.findall(html_text)
+    ]
+    if len(authors) < len(links):
+        authors.extend([""] * (len(links) - len(authors)))
+    elif len(authors) > len(links):
+        authors = authors[: len(links)]
+
+    return titles, links, authors
+
+
 def get_game_name(appid: str) -> str:
     """Fetch the human-readable game name for the given App ID."""
     url = build_workshop_url(appid, page=1)
     try:
         r = SESSION.get(url, timeout=15)
         r.raise_for_status()
-        match = re.search(
-            r'<div class="apphub_AppName ellipsis">\s*(.*?)\s*</div>',
-            r.text,
-        )
-        return match.group(1) if match else "Unknown Game"
+        name = game_name_from_browse_html(r.text)
+        return name or "Unknown Game"
     except requests.RequestException:
         return "Unknown Game"
 

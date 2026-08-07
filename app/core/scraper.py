@@ -3,7 +3,6 @@
 import csv
 import os
 import random
-import re
 import time
 from typing import Callable
 
@@ -13,7 +12,10 @@ from .utils import (
     SESSION,
     build_workshop_url,
     csv_path,
+    extract_workshop_id,
     fetch_file_size,
+    parse_workshop_browse_meta,
+    parse_workshop_browse_page,
 )
 
 
@@ -53,25 +55,18 @@ def scrape_workshop(
     links: list[str] = []
     page = 1
     pages_remaining = num_pages  # -1 = unlimited
-
-    title_pat = re.compile(
-        r'<div class="workshopItemTitle ellipsis">(.*?)<\/div>', re.DOTALL
-    )
-    author_pat = re.compile(
-        r'<div class="workshopItemAuthorName ellipsis">by&nbsp;'
-        r'<a class="workshop_author_link" href=".*?">(.*?)<\/a><\/div>',
-        re.DOTALL,
-    )
-    link_pat = re.compile(
-        r'<a data-panel="{&quot;focusable&quot;:false}" href="(.*?)" class="item_link">',
-        re.DOTALL,
-    )
+    max_pages: int | None = None
+    prev_page_ids: list[str] | None = None
 
     log_fn(f"Starting scrape for App ID {appid}...")
 
     while pages_remaining != 0:
         if cancel_check and cancel_check():
             log_fn("Scrape cancelled.")
+            break
+
+        if max_pages is not None and page > max_pages:
+            log_fn(f"Reached workshop browse page limit ({max_pages}).")
             break
 
         page_url = build_workshop_url(appid=appid, page=page, sort_key=sort_key)
@@ -84,22 +79,26 @@ def scrape_workshop(
 
         html = response.text
 
-        if "No items matching your search criteria were found." in html:
+        if page == 1 and pages_remaining == -1:
+            meta = parse_workshop_browse_meta(html)
+            if meta.get("max_pages"):
+                max_pages = meta["max_pages"]
+                log_fn(
+                    f"Workshop has {meta['total']} items "
+                    f"(up to {max_pages} pages at {meta['per_page']} per page)."
+                )
+
+        page_titles, page_links, page_authors = parse_workshop_browse_page(html)
+
+        if not page_links:
             log_fn(f"No more items found after page {page - 1}.")
             break
 
-        page_titles = title_pat.findall(html)
-        page_authors = author_pat.findall(html)
-        page_links = link_pat.findall(html)
-
-        if not page_titles:
-            log_fn(f"WARNING: Page {page} returned no items — stopping.")
+        page_ids = [iid for iid in (extract_workshop_id(link) for link in page_links) if iid]
+        if prev_page_ids is not None and page_ids == prev_page_ids:
+            log_fn(f"Page {page} duplicated previous results — stopping.")
             break
-
-        count = max(len(page_titles), len(page_authors), len(page_links))
-        page_titles  += [""] * (count - len(page_titles))
-        page_authors += [""] * (count - len(page_authors))
-        page_links   += [""] * (count - len(page_links))
+        prev_page_ids = page_ids
 
         titles.extend(page_titles)
         authors.extend(page_authors)

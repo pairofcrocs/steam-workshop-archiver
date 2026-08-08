@@ -13,7 +13,6 @@ from .utils import (
     build_workshop_url,
     csv_path,
     extract_workshop_id,
-    fetch_file_size,
     parse_workshop_browse_meta,
     parse_workshop_browse_page,
 )
@@ -128,36 +127,3 @@ def scrape_workshop(
 
     log_fn(f"Saved {len(titles)} items to CSV: {out_path}")
     return out_path
-
-
-def scrape_file_sizes(
-    links: list[str],
-    delay_min: float = 1.0,
-    delay_max: float = 2.5,
-    log_fn: Callable[[str], None] | None = None,
-    cancel_check: Callable[[], bool] | None = None,
-) -> list[str]:
-    """Fetch the file size for every workshop item link."""
-    if log_fn is None:
-        import logging
-        log_fn = logging.getLogger(__name__).info
-
-    sizes: list[str] = []
-    total = len(links)
-    log_fn(f"Fetching file sizes for {total} items...")
-
-    for i, url in enumerate(links, start=1):
-        if cancel_check and cancel_check():
-            log_fn("File size fetch cancelled.")
-            sizes.extend([""] * (total - len(sizes)))
-            break
-
-        size = fetch_file_size(url)
-        sizes.append(size)
-        log_fn(f"[{i}/{total}]  {size if size else '(unknown)'}")
-        if i < total:
-            time.sleep(random.uniform(min(delay_min, delay_max), max(delay_min, delay_max)))
-
-    fetched = sum(1 for s in sizes if s)
-    log_fn(f"File sizes fetched: {fetched}/{total} retrieved.")
-    return sizes

@@ -322,7 +322,7 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
             return
 
         log(f"Fetching game name for App ID {appid}...")
-        game_name = get_game_name(appid)
+        game_name = get_game_name(appid, cache_dir=META_DIR)
         job.game_name = game_name
         log(f"Game: {game_name}")
 
@@ -509,11 +509,16 @@ async def search_games(q: str = ""):
     if not q.strip():
         return []
     key = q.strip().lower()
+    now = time.time()
     cached = _search_cache.get(key)
-    if cached and time.time() - cached[0] < _SEARCH_CACHE_TTL:
+    if cached and now - cached[0] < _SEARCH_CACHE_TTL:
         return cached[1]
     results = await asyncio.to_thread(_do_search, q.strip())
-    _search_cache[key] = (time.time(), results)
+    # Evict expired entries so the cache doesn't grow without bound
+    expired = [k for k, (ts, _) in _search_cache.items() if now - ts >= _SEARCH_CACHE_TTL]
+    for k in expired:
+        _search_cache.pop(k, None)
+    _search_cache[key] = (now, results)
     return results
 
 
@@ -632,8 +637,7 @@ def _safe_int(v) -> int:
 # ---------------------------------------------------------------------------
 # Workshop browser routes
 # ---------------------------------------------------------------------------
-@app.get("/api/workshop")
-async def list_workshop_appids():
+def _list_workshop_appids_sync() -> list[dict]:
     """List all appids that have downloaded content in DOWNLOADS_DIR."""
     content_base = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", "content")
     result = []
@@ -657,7 +661,7 @@ async def list_workshop_appids():
             )
             result.append({
                 "appid": appid,
-                "game_name": get_game_name(appid),
+                "game_name": get_game_name(appid, cache_dir=META_DIR),
                 "item_count": item_count,
                 "total_size": total_size,
                 "total_size_formatted": format_bytes(total_size),
@@ -667,14 +671,19 @@ async def list_workshop_appids():
     return result
 
 
-@app.get("/api/workshop/{appid}")
-async def workshop_items(appid: str):
+@app.get("/api/workshop")
+async def list_workshop_appids():
+    # Runs in a worker thread: game-name lookups may hit Steam and the
+    # directory scans may touch slow network storage.
+    return await asyncio.to_thread(_list_workshop_appids_sync)
+
+
+def _workshop_items_sync(appid: str) -> dict:
     """Return all downloaded workshop items for an appid with full metadata."""
-    _require_numeric_id(appid, "App ID")
     content_dir = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", "content", appid)
     acf_path = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", f"appworkshop_{appid}.acf")
     acf_data = parse_acf_items(acf_path)
-    game_name = get_game_name(appid)
+    game_name = get_game_name(appid, cache_dir=META_DIR)
 
     # Load API metadata cache — single source for title/description/tags/time_updated
     metadata_file = os.path.join(META_DIR, "games", appid, "metadata.json")
@@ -753,6 +762,14 @@ async def workshop_items(appid: str):
         "total_size": total_size,
         "total_size_formatted": format_bytes(total_size),
     }
+
+
+@app.get("/api/workshop/{appid}")
+async def workshop_items(appid: str):
+    _require_numeric_id(appid, "App ID")
+    # Runs in a worker thread: per-item disk reads (metadata, previews,
+    # desc-image maps) can be slow on network storage.
+    return await asyncio.to_thread(_workshop_items_sync, appid)
 
 
 @app.get("/workshop/{appid}", response_class=HTMLResponse)

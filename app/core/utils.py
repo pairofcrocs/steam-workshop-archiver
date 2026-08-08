@@ -61,14 +61,6 @@ STEAM_API_DETAILS_URL = (
     "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
 )
 
-# Patterns for extracting file-size metadata from individual item pages
-_DETAILS_BLOCK_PAT = re.compile(
-    r'<div class="rightDetailsBlock">(.*?)<div style="clear:left">',
-    re.DOTALL,
-)
-_STAT_LABEL_PAT = re.compile(r'<div class="detailsStatLeft">(.*?)</div>', re.DOTALL)
-_STAT_VALUE_PAT = re.compile(r'<div class="detailsStatRight">(.*?)</div>', re.DOTALL)
-
 # Workshop browse page (React SSR redesign)
 _SSR_LOADER_RE = re.compile(r"window\.SSR\.loaderData = (\[.*?\]);", re.DOTALL)
 _WORKSHOP_LINK_RE = re.compile(
@@ -460,31 +452,70 @@ def parse_workshop_browse_page(html_text: str) -> tuple[list[str], list[str], li
     return titles, links, authors
 
 
-def get_game_name(appid: str) -> str:
-    """Fetch the human-readable game name for the given App ID."""
+# Game names effectively never change, so cache them forever: in memory for
+# this process and (when cache_dir is given) in a JSON file across restarts.
+# Without this, every dashboard load fetched a full Steam browse page per app.
+_game_name_cache: dict[str, str] = {}
+_game_name_cache_lock = threading.Lock()
+
+
+def _game_names_file(cache_dir: str) -> str:
+    return os.path.join(cache_dir, "game_names.json")
+
+
+def get_game_name(appid: str, cache_dir: str = "") -> str:
+    """Fetch the human-readable game name for the given App ID (cached)."""
+    with _game_name_cache_lock:
+        name = _game_name_cache.get(appid)
+    if name:
+        return name
+
+    if cache_dir:
+        try:
+            with open(_game_names_file(cache_dir), "r", encoding="utf-8") as f:
+                name = json.load(f).get(appid)
+        except (OSError, ValueError):
+            name = None
+        if name:
+            with _game_name_cache_lock:
+                _game_name_cache[appid] = name
+            return name
+
     url = build_workshop_url(appid, page=1)
     try:
         r = SESSION.get(url, timeout=15)
         r.raise_for_status()
         name = game_name_from_browse_html(r.text)
-        return name or "Unknown Game"
     except requests.RequestException:
+        name = ""
+
+    if not name:
+        # Failed lookups are not cached so the next call can retry.
         return "Unknown Game"
+
+    with _game_name_cache_lock:
+        _game_name_cache[appid] = name
+    if cache_dir:
+        path = _game_names_file(cache_dir)
+        with _meta_lock(path):
+            try:
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        stored = json.load(f)
+                except (OSError, ValueError):
+                    stored = {}
+                stored[appid] = name
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(stored, f, indent=2)
+            except OSError:
+                pass
+    return name
 
 
 # ---------------------------------------------------------------------------
 # Size helpers
 # ---------------------------------------------------------------------------
-def parse_size_bytes(size_str: str) -> float:
-    """Convert a human-readable size string (e.g. '3.602 GB') to bytes."""
-    units = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3, "TB": 1024 ** 4}
-    m = re.match(r"([\d,.]+)\s*([KMGT]?B)", size_str.strip(), re.IGNORECASE)
-    if not m:
-        return 0.0
-    number = float(m.group(1).replace(",", ""))
-    return number * units.get(m.group(2).upper(), 0.0)
-
-
 def format_bytes(total: float) -> str:
     """Format a byte count as a human-readable string."""
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -492,29 +523,6 @@ def format_bytes(total: float) -> str:
             return f"{total:.2f} {unit}"
         total /= 1024.0
     return str(total)
-
-
-# ---------------------------------------------------------------------------
-# File-size fetching
-# ---------------------------------------------------------------------------
-def fetch_file_size(url: str) -> str:
-    """Fetch a workshop item page and return its file size string."""
-    clean_url = url.split("&")[0] if "&" in url else url
-    try:
-        r = SESSION.get(clean_url, timeout=15)
-        r.raise_for_status()
-    except requests.RequestException:
-        return ""
-    block_match = _DETAILS_BLOCK_PAT.search(r.text)
-    if not block_match:
-        return ""
-    block = block_match.group(1)
-    labels = _STAT_LABEL_PAT.findall(block)
-    values = _STAT_VALUE_PAT.findall(block)
-    for label, value in zip(labels, values):
-        if "File Size" in label:
-            return value.strip()
-    return ""
 
 
 # ---------------------------------------------------------------------------

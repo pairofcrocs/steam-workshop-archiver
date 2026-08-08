@@ -305,6 +305,25 @@ async def _scheduler_loop() -> None:
 # ---------------------------------------------------------------------------
 # Pipeline (runs in a background thread)
 # ---------------------------------------------------------------------------
+def _record_job_outcome(job: Job) -> None:
+    """Persist how the run ended onto its saved job, for display in the UI."""
+    if not job.saved_job_id:
+        return
+    if job.cancelled:
+        outcome = "cancelled"
+    elif job.status == JobStatus.ERROR:
+        outcome = "error"
+    else:
+        outcome = "done"
+    with _saved_jobs_lock:
+        for saved in _saved_jobs:
+            if saved["id"] == job.saved_job_id:
+                saved["last_status"] = outcome
+                saved["last_error"] = job.error
+                _save_saved_jobs()
+                break
+
+
 def _run_pipeline(job: Job, req: StartJobRequest) -> None:
     def log(msg: str) -> None:
         job.append_log(msg)
@@ -451,6 +470,8 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
         job.status = JobStatus.ERROR
         job.error = str(exc)
         job.append_log(f"FATAL ERROR: {exc}")
+    finally:
+        _record_job_outcome(job)
 
 
 # ---------------------------------------------------------------------------

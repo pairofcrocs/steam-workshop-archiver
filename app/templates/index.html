@@ -97,6 +97,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;  /* allow grid items to shrink below their content width */
   }
   .form-group.full {
     grid-column: 1 / -1;
@@ -153,7 +154,7 @@
 
   /* ---- Delay range inputs ---- */
   .delay-row { display: flex; gap: 8px; align-items: center; }
-  .delay-row input { flex: 1; }
+  .delay-row input { flex: 1; min-width: 0; }
   .delay-row input::-webkit-outer-spin-button,
   .delay-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .delay-row input[type=number] { -moz-appearance: textfield; }
@@ -223,7 +224,6 @@
     font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
     font-size: 12.5px;
     line-height: 1.6;
-    scroll-behavior: smooth;
   }
   .log-line {
     white-space: pre-wrap;
@@ -439,6 +439,17 @@
 
   /* ---- Hidden utility ---- */
   .hidden { display: none !important; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 640px) {
+    header { padding: 12px 16px; flex-wrap: wrap; }
+    header .subtitle { margin-left: 0; width: 100%; }
+    main { padding: 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .modal-field-row { flex-direction: column; align-items: stretch; }
+    .archive-item-row { flex-wrap: wrap; }
+    .archive-links { margin-left: 0; width: 100%; justify-content: flex-end; }
+  }
 </style>
 </head>
 <body>
@@ -512,7 +523,16 @@
             <span class="hint">Random delay between min &amp; max — be respectful to Steam's servers</span>
           </div>
 
-          <div class="form-group full">
+          <div class="form-group">
+            <label for="job-mode">Mode</label>
+            <select id="job-mode" class="field-select">
+              <option value="full">Scrape + Download</option>
+              <option value="scrape">Scrape only — update item list</option>
+              <option value="download">Download only — use existing list</option>
+            </select>
+          </div>
+
+          <div class="form-group">
             <label>Options</label>
             <label class="check-row">
               <input type="checkbox" id="fetch-sizes">
@@ -612,6 +632,15 @@
           <span class="delay-sep">to</span>
           <input id="edit-delay-max" type="number" min="0" step="0.1" title="Max delay">
         </div>
+      </div>
+
+      <div class="form-group">
+        <label for="edit-mode">Mode</label>
+        <select id="edit-mode" class="field-select">
+          <option value="full">Scrape + Download</option>
+          <option value="scrape">Scrape only — update item list</option>
+          <option value="download">Download only — use existing list</option>
+        </select>
       </div>
 
       <div class="form-group">
@@ -719,6 +748,7 @@
 
   function renderDropdown(results) {
     searchDropdown.innerHTML = '';
+    searchActiveIndex = -1;
     if (!results.length) {
       const li = document.createElement('li');
       li.className = 'search-no-results';
@@ -762,6 +792,31 @@
     setTimeout(() => searchDropdown.classList.add('hidden'), 150);
   });
 
+  // Keyboard navigation for the search dropdown
+  let searchActiveIndex = -1;
+  gameSearch.addEventListener('keydown', e => {
+    if (searchDropdown.classList.contains('hidden')) return;
+    const items = [...searchDropdown.querySelectorAll('li')].filter(
+      li => !li.classList.contains('search-no-results')
+    );
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      searchActiveIndex = e.key === 'ArrowDown'
+        ? (searchActiveIndex + 1) % items.length
+        : (searchActiveIndex - 1 + items.length) % items.length;
+      items.forEach((li, i) => li.classList.toggle('active', i === searchActiveIndex));
+      items[searchActiveIndex].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();  // don't submit the form from the search box
+      const pick = items[searchActiveIndex >= 0 ? searchActiveIndex : 0];
+      pick.dispatchEvent(new Event('mousedown'));
+    } else if (e.key === 'Escape') {
+      searchDropdown.classList.add('hidden');
+    }
+  });
+
   // ---------------------------------------------------------------------------
   // Utilities
   // ---------------------------------------------------------------------------
@@ -790,10 +845,17 @@
     return '';
   }
 
+  const LOG_DOM_MAX = 4000;  // cap rendered lines so huge jobs don't bog the page
+
   function appendLog(msg) {
     // Remove placeholder
     const empty = logOutput.querySelector('.log-empty');
     if (empty) empty.remove();
+
+    // Only auto-scroll when the user is already near the bottom, so they can
+    // scroll up to read earlier output while the job keeps running.
+    const nearBottom =
+      logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 60;
 
     const ts  = new Date().toTimeString().slice(0, 8);
     const cls = classifyLine(msg);
@@ -801,7 +863,21 @@
     line.className = 'log-line' + (cls ? ' ' + cls : '');
     line.textContent = ts + '  ' + msg;
     logOutput.appendChild(line);
-    logOutput.scrollTop = logOutput.scrollHeight;
+
+    while (logOutput.children.length > LOG_DOM_MAX) {
+      logOutput.removeChild(logOutput.firstChild);
+    }
+    if (nearBottom) logOutput.scrollTop = logOutput.scrollHeight;
+  }
+
+  // Put the UI into "job running" state and start streaming the log.
+  function enterRunningUI() {
+    setFormDisabled(true);
+    startBtn.classList.add('hidden');
+    cancelBtn.classList.remove('hidden');
+    logCard.classList.remove('hidden');
+    setStatus('running');
+    connectStream();
   }
 
   // ---------------------------------------------------------------------------
@@ -900,7 +976,11 @@
     // Schedule / last-run row
     if (savedJob) {
       const schedLabel = scheduleLabel(savedJob);
-      const lastRun    = savedJob.last_run_at ? 'Last: ' + relativeTime(savedJob.last_run_at) : 'Never run';
+      const marks      = { done: ' ✓', error: ' ✗ failed', cancelled: ' ⊘ cancelled' };
+      const statusMark = marks[savedJob.last_status] || '';
+      const lastRun    = savedJob.last_run_at
+        ? 'Last: ' + relativeTime(savedJob.last_run_at) + statusMark
+        : 'Never run';
       const nextRun    = savedJob.next_run_at  ? ' · Next: ' + timeUntil(savedJob.next_run_at) : '';
       const text       = schedLabel ? `${schedLabel} · ${lastRun}${nextRun}` : lastRun;
 
@@ -987,14 +1067,15 @@
     const appid = appidInput.value.trim();
     if (!appid) { alert('Please search for and select a game first.'); return; }
 
+    const mode = document.getElementById('job-mode').value;
     const body = {
       appid,
       game_name:     currentGameName || gameSearch.value.trim() || appid,
       pages:         document.getElementById('pages').value.trim() || 'all',
       delay_min:     parseFloat(document.getElementById('delay-min').value) || 1.0,
       delay_max:     parseFloat(document.getElementById('delay-max').value) || 2.5,
-      scrape_only:   false,
-      download_only: false,
+      scrape_only:   mode === 'scrape',
+      download_only: mode === 'download',
       schedule_type: 'none',
       schedule_value: '',
       sort_key:      getSortKey(),
@@ -1028,13 +1109,7 @@
       if (res.status === 409) { alert('A job is already running. Please wait for it to finish.'); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      setFormDisabled(true);
-      startBtn.classList.add('hidden');
-      cancelBtn.classList.remove('hidden');
-      logCard.classList.remove('hidden');
-      logOutput.innerHTML = '<span class="log-empty">Connecting...</span>';
-      setStatus('running');
-      connectStream();
+      enterRunningUI();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       alert('Failed to start refresh: ' + err.message);
@@ -1053,6 +1128,8 @@
     document.getElementById('edit-pages').value     = savedJob.pages || 'all';
     document.getElementById('edit-delay-min').value = savedJob.delay_min ?? 1.0;
     document.getElementById('edit-delay-max').value = savedJob.delay_max ?? 2.5;
+    document.getElementById('edit-mode').value =
+      savedJob.scrape_only ? 'scrape' : savedJob.download_only ? 'download' : 'full';
     setSortKey(savedJob.sort_key || 'trend_week');
 
     const schedType = savedJob.schedule_type || 'none';
@@ -1120,14 +1197,15 @@
       ? 'trend_' + document.getElementById('edit-sort-timerange').value
       : editSortMain;
 
+    const editMode = document.getElementById('edit-mode').value;
     const body = {
       appid:          document.getElementById('edit-job-appid').value,
       game_name:      document.getElementById('edit-job-game-name').value,
       pages:          document.getElementById('edit-pages').value.trim() || 'all',
       delay_min:      parseFloat(document.getElementById('edit-delay-min').value) || 1.0,
       delay_max:      parseFloat(document.getElementById('edit-delay-max').value) || 2.5,
-      scrape_only:    false,
-      download_only:  false,
+      scrape_only:    editMode === 'scrape',
+      download_only:  editMode === 'download',
       schedule_type:  schedType,
       schedule_value: schedValue,
       sort_key:       editSortKey,
@@ -1248,6 +1326,7 @@
 
     const rawMin = parseFloat(document.getElementById('delay-min').value) || 1.0;
     const rawMax = parseFloat(document.getElementById('delay-max').value) || 2.5;
+    const mode   = document.getElementById('job-mode').value;
 
     const body = {
       appid,
@@ -1255,8 +1334,8 @@
       delay_min:     Math.min(rawMin, rawMax),
       delay_max:     Math.max(rawMin, rawMax),
       fetch_sizes:   document.getElementById('fetch-sizes').checked,
-      scrape_only:   false,
-      download_only: false,
+      scrape_only:   mode === 'scrape',
+      download_only: mode === 'download',
       sort_key:      getSortKey(),
     };
 
@@ -1280,7 +1359,6 @@
         throw new Error(err.detail || 'Failed to start job.');
       }
 
-      logOutput.innerHTML = '';
       connectStream();
 
     } catch (err) {
@@ -1317,17 +1395,25 @@
       const data = await res.json();
 
       if (data.status === 'running') {
-        setFormDisabled(true);
-        startBtn.classList.add('hidden');
-        cancelBtn.classList.remove('hidden');
-        logCard.classList.remove('hidden');
-        setStatus('running');
-        appendLog('Reconnecting to running job...');
-        connectStream();
+        enterRunningUI();
         if (data.waiting_confirm) showConfirmBar();
       }
     } catch (_) { /* ignore */ }
   })();
+
+  // Poll while idle so a scheduled job that starts in the background flips
+  // the UI into streaming mode without a manual page refresh.
+  setInterval(async () => {
+    if (eventSource) return;  // already streaming a job
+    try {
+      const res  = await fetch('/jobs/status');
+      const data = await res.json();
+      if (data.status === 'running') {
+        enterRunningUI();
+        if (data.waiting_confirm) showConfirmBar();
+      }
+    } catch (_) { /* ignore */ }
+  }, 15000);
 
   // ---------------------------------------------------------------------------
   // Confirm download

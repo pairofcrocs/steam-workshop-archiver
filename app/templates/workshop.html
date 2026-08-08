@@ -515,6 +515,19 @@
   let activeTags = new Set();
   let _modalItem = null;
 
+  function formatBytes(n) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(2) + ' ' + units[i];
+  }
+
+  function updateHeaderStats() {
+    const totalSize = allItems.reduce((s, it) => s + (it.size || 0), 0);
+    document.getElementById('header-stats').innerHTML =
+      `<strong>${allItems.length}</strong> items &nbsp;·&nbsp; <strong>${formatBytes(totalSize)}</strong>`;
+  }
+
   // ── Data loading ─────────────────────────────────────────────────────────────
   async function load() {
     try {
@@ -525,8 +538,7 @@
 
       document.title = `${data.game_name} — Workshop Browser`;
       document.getElementById('header-title').textContent = `${data.game_name}`;
-      document.getElementById('header-stats').innerHTML =
-        `<strong>${data.items.length}</strong> items &nbsp;·&nbsp; <strong>${data.total_size_formatted}</strong>`;
+      updateHeaderStats();
 
       buildTagFilters();
       renderCards();
@@ -783,8 +795,7 @@
       allItems = allItems.filter(i => i.id !== _modalItem.id);
       closeModal();
       renderCards();
-      document.getElementById('header-stats').innerHTML =
-        `<strong>${allItems.length}</strong> items`;
+      updateHeaderStats();
     } catch (err) {
       alert(`Failed to delete: ${err.message}`);
     }

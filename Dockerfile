@@ -38,5 +38,9 @@ RUN chmod +x /entrypoint.sh
 
 EXPOSE 8080
 
+# /healthz is exempt from AUTH_PASSWORD, so this works with auth enabled
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fs http://localhost:8080/healthz || exit 1
+
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import AsyncGenerator
-from urllib.parse import quote as url_quote
+from urllib.parse import quote as url_quote, urlparse
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -135,9 +135,26 @@ app = FastAPI(title="Steam Workshop Archiver", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
+# Reject state-changing requests whose Origin doesn't match the Host header.
+# Browsers attach credentials (e.g. Basic Auth) automatically, so without this
+# a malicious page could fire authenticated POST/DELETE requests cross-site.
+class _SameOriginMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method in ("POST", "PUT", "DELETE"):
+            origin = request.headers.get("Origin")
+            if origin and urlparse(origin).netloc != request.headers.get("Host", ""):
+                return Response(status_code=403, content="Cross-origin request rejected")
+        return await call_next(request)
+
+
+app.add_middleware(_SameOriginMiddleware)
+
 if AUTH_PASSWORD:
     class _BasicAuthMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
+            # Health probes must work without credentials
+            if request.url.path == "/healthz":
+                return await call_next(request)
             auth = request.headers.get("Authorization", "")
             if auth.startswith("Basic "):
                 try:
@@ -477,6 +494,12 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.get("/healthz")
+async def healthz():
+    """Unauthenticated liveness probe for container healthchecks."""
+    return {"status": "ok"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {

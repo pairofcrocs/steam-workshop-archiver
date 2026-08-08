@@ -5,7 +5,6 @@ import base64
 import csv
 import json
 import os
-import queue
 import re
 import secrets
 import shutil
@@ -166,10 +165,18 @@ class JobStatus(str, Enum):
     ERROR = "error"
 
 
+# Cap on retained log lines per job; oldest lines are trimmed past this.
+_LOG_BUFFER_MAX = 50_000
+
+
 @dataclass
 class Job:
     status: JobStatus = JobStatus.IDLE
-    log_queue: queue.Queue = field(default_factory=queue.Queue)
+    # Append-only log buffer. Each SSE client keeps its own read index, so any
+    # number of viewers can stream (and replay) the same job's log.
+    log_lines: list[str] = field(default_factory=list)
+    log_offset: int = 0  # number of lines trimmed from the front of log_lines
+    log_lock: threading.Lock = field(default_factory=threading.Lock)
     thread: threading.Thread | None = None
     appid: str = ""
     game_name: str = ""
@@ -178,6 +185,23 @@ class Job:
     saved_job_id: str = ""
     waiting_confirm: bool = False
     confirm_event: threading.Event = field(default_factory=threading.Event)
+
+    def append_log(self, msg: str) -> None:
+        with self.log_lock:
+            self.log_lines.append(msg)
+            if len(self.log_lines) > _LOG_BUFFER_MAX:
+                trim = _LOG_BUFFER_MAX // 5
+                del self.log_lines[:trim]
+                self.log_offset += trim
+
+    def read_log(self, index: int, limit: int = 500) -> tuple[list[str], int]:
+        """Return (lines, next_index) starting at absolute line *index*."""
+        with self.log_lock:
+            if index < self.log_offset:
+                index = self.log_offset
+            start = index - self.log_offset
+            lines = self.log_lines[start: start + limit]
+            return lines, index + len(lines)
 
 
 # Single global job; only one job runs at a time.
@@ -283,7 +307,7 @@ async def _scheduler_loop() -> None:
 # ---------------------------------------------------------------------------
 def _run_pipeline(job: Job, req: StartJobRequest) -> None:
     def log(msg: str) -> None:
-        job.log_queue.put(msg)
+        job.append_log(msg)
 
     def cancelled() -> bool:
         return job.cancelled
@@ -369,10 +393,15 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
             # Pause here so the user can review the size before committing to the download.
             # In scrape-only mode there is nothing to confirm, so we skip the gate.
             if not req.scrape_only:
-                log("__CONFIRM_NEEDED__")
+                # waiting_confirm must be set before the sentinel is logged so a
+                # streaming client never sees the sentinel while the flag is False.
                 job.waiting_confirm = True
-                job.confirm_event.wait(timeout=3600)
+                log("__CONFIRM_NEEDED__")
+                confirmed = job.confirm_event.wait(timeout=3600)
                 job.waiting_confirm = False
+                if not confirmed:
+                    job.cancelled = True
+                    log("No confirmation received within 1 hour — cancelling job.")
 
         if cancelled():
             job.status = JobStatus.DONE
@@ -421,7 +450,7 @@ def _run_pipeline(job: Job, req: StartJobRequest) -> None:
     except Exception as exc:
         job.status = JobStatus.ERROR
         job.error = str(exc)
-        job.log_queue.put(f"FATAL ERROR: {exc}")
+        job.append_log(f"FATAL ERROR: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -527,42 +556,45 @@ async def job_status():
 
 @app.get("/jobs/stream")
 async def job_stream():
-    """Server-Sent Events endpoint that streams log lines from the current job."""
+    """Server-Sent Events endpoint that streams log lines from the current job.
+
+    Each connection replays the job's full log from the start, then follows new
+    lines. Multiple clients can stream concurrently, and a page refresh gets
+    the complete history back.
+    """
 
     async def generate() -> AsyncGenerator[str, None]:
         # Send a heartbeat comment immediately so the browser knows the stream is open
         yield ": connected\n\n"
 
+        job = _current_job  # follow the job that was current at connect time
+        index = job.log_offset
+
         while True:
-            try:
-                message = _current_job.log_queue.get_nowait()
-                if message == "__CONFIRM_NEEDED__":
-                    payload = json.dumps({"type": "confirm"})
-                else:
-                    payload = json.dumps({"type": "log", "message": message})
-                yield f"data: {payload}\n\n"
-            except queue.Empty:
-                if _current_job.status not in (JobStatus.RUNNING,):
-                    # Drain any remaining messages before closing
-                    while True:
-                        try:
-                            message = _current_job.log_queue.get_nowait()
-                            if message == "__CONFIRM_NEEDED__":
-                                payload = json.dumps({"type": "confirm"})
-                            else:
-                                payload = json.dumps({"type": "log", "message": message})
-                            yield f"data: {payload}\n\n"
-                        except queue.Empty:
-                            break
-                    payload = json.dumps({
-                        "type": "done",
-                        "status": _current_job.status,
-                        "appid": _current_job.appid,
-                        "game_name": _current_job.game_name,
-                    })
+            lines, index = job.read_log(index)
+            if lines:
+                for message in lines:
+                    if message == "__CONFIRM_NEEDED__":
+                        # Only surface the confirm prompt if it is still pending
+                        # (skips stale sentinels during replay).
+                        if not job.waiting_confirm:
+                            continue
+                        payload = json.dumps({"type": "confirm"})
+                    else:
+                        payload = json.dumps({"type": "log", "message": message})
                     yield f"data: {payload}\n\n"
-                    break
-                await asyncio.sleep(0.05)
+                continue
+
+            if job.status is not JobStatus.RUNNING:
+                payload = json.dumps({
+                    "type": "done",
+                    "status": job.status,
+                    "appid": job.appid,
+                    "game_name": job.game_name,
+                })
+                yield f"data: {payload}\n\n"
+                break
+            await asyncio.sleep(0.2)
 
     return StreamingResponse(
         generate(),
@@ -610,13 +642,19 @@ async def list_workshop_appids():
             appid_dir = os.path.join(content_base, appid)
             if not os.path.isdir(appid_dir):
                 continue
-            item_count = sum(
-                1 for e in os.scandir(appid_dir)
+            on_disk_ids = {
+                e.name[:-4] if e.name.endswith(".bin") else e.name
+                for e in os.scandir(appid_dir)
                 if e.is_dir() or e.name.endswith(".bin")
-            )
+            }
+            item_count = len(on_disk_ids)
             acf_path = os.path.join(DOWNLOADS_DIR, "steamapps", "workshop", f"appworkshop_{appid}.acf")
             acf_data = parse_acf_items(acf_path)
-            total_size = sum(v["size"] for v in acf_data.values())
+            # Only count ACF entries still present on disk — the ACF retains
+            # entries for items deleted through the UI until SteamCMD rewrites it.
+            total_size = sum(
+                v["size"] for iid, v in acf_data.items() if iid in on_disk_ids
+            )
             result.append({
                 "appid": appid,
                 "game_name": get_game_name(appid),
@@ -776,12 +814,18 @@ async def download_item(appid: str, item_id: str):
     if not os.path.isdir(item_dir):
         raise HTTPException(status_code=404, detail="Item not found.")
 
-    # Use folder_name from workshop.json as the archive root name
+    # Use folder_name from workshop.json as the archive root name.
+    # FolderName comes from downloaded (untrusted) content: reduce it to a safe
+    # ASCII basename so it can't smuggle path separators into the zip entries
+    # or malformed bytes into the Content-Disposition header.
     archive_name = item_id
     try:
         with open(os.path.join(item_dir, "workshop.json"), "r", encoding="utf-8") as f:
             wj = json.load(f)
-        archive_name = wj.get("FolderName", item_id) or item_id
+        raw_name = str(wj.get("FolderName", item_id) or item_id)
+        raw_name = os.path.basename(raw_name.replace("\\", "/"))
+        safe_name = re.sub(r"[^A-Za-z0-9._ -]", "_", raw_name).strip(" .")
+        archive_name = safe_name or item_id
     except (OSError, ValueError):
         pass
 
@@ -871,7 +915,9 @@ async def fetch_workshop_metadata(appid: str):
         raise HTTPException(status_code=404, detail="No downloaded items found for this app.")
 
     def _do_fetch() -> None:
-        fetch_and_cache_metadata(appid, item_ids, META_DIR)
+        # force_refresh so the button also updates stale cached entries
+        # (titles, descriptions, time_updated) — not just uncached items.
+        fetch_and_cache_metadata(appid, item_ids, META_DIR, force_refresh=True)
 
     thread = threading.Thread(target=_do_fetch, daemon=True)
     thread.start()

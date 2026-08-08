@@ -307,6 +307,10 @@ def workshop_item_satisfied(
     - New items must appear on disk.
     - Pre-existing items must have been updated this run (ACF or .bin mtime),
       or already match the workshop's published time_updated from API metadata.
+    - When no API timestamp is available for a pre-existing, unchanged item, it
+      is treated as satisfied: the archive already holds a copy and there is no
+      reference to prove it stale (avoids false failures and pointless retries
+      on re-runs without a metadata cache).
     """
     if not is_item_downloaded(downloads_dir, appid, workshop_id):
         return False
@@ -331,10 +335,12 @@ def workshop_item_satisfied(
         if os.path.getmtime(bin_path) > snapshot.bin_mtime[workshop_id]:
             return True
 
-    if api_time_updated > 0 and after_time >= api_time_updated:
-        return True
+    if api_time_updated > 0:
+        return after_time >= api_time_updated
 
-    return False
+    # No API reference timestamp: item exists locally and SteamCMD left it
+    # unchanged — accept the existing copy.
+    return True
 
 
 def verify_downloaded_items(
@@ -591,13 +597,16 @@ def fetch_and_cache_metadata(
     meta_dir: str,
     log_fn=None,
     download_previews: bool = True,
+    force_refresh: bool = False,
 ) -> dict:
     """Batch-fetch workshop item metadata from the Steam Web API.
 
     Saves preview images to ``{meta_dir}/games/{appid}/previews/{item_id}.jpg``
     and caches metadata to ``{meta_dir}/games/{appid}/metadata.json``.
     Returns the full metadata dict keyed by item_id.
-    Only fetches items not already present in the cache.
+    Only fetches items not already present in the cache, unless *force_refresh*
+    is set — then every requested item is re-fetched so stale entries
+    (time_updated, descriptions, previews) get updated.
     """
     def log(msg: str) -> None:
         if log_fn:
@@ -618,8 +627,11 @@ def fetch_and_cache_metadata(
         except (OSError, ValueError):
             pass
 
-        # Only hit the API for items not already cached
-        to_fetch = [i for i in item_ids if i not in cached]
+        # Only hit the API for items not already cached (or everything on refresh)
+        if force_refresh:
+            to_fetch = list(item_ids)
+        else:
+            to_fetch = [i for i in item_ids if i not in cached]
         if not to_fetch:
             log(f"Metadata already cached for all {len(item_ids)} items.")
         else:

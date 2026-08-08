@@ -1179,6 +1179,10 @@
   function connectStream() {
     if (eventSource) { eventSource.close(); eventSource = null; }
 
+    // The stream replays the job's full log from the start, so clear any
+    // existing lines to avoid duplicates on reconnect.
+    logOutput.innerHTML = '';
+
     eventSource = new EventSource('/jobs/stream');
 
     eventSource.onmessage = e => {

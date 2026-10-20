@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>steam-workshop-archiver</Name>
+  <Repository>ghcr.io/pairofcrocs/steam-workshop-archiver:latest</Repository>
+  <Registry>https://github.com/pairofcrocs/steam-workshop-archiver/pkgs/container/steam-workshop-archiver</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/pairofcrocs/steam-workshop-archiver/issues</Support>
+  <Project>https://github.com/pairofcrocs/steam-workshop-archiver</Project>
+  <Overview>Self-hosted Steam Workshop archiver: list a game's Workshop (or a collection / item list), download it with SteamCMD or DepotDownloader, keep it updated on a schedule, and browse it offline.</Overview>
+  <Category>Downloaders: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/pairofcrocs/unraid-templates/main/Steam-Workshop-Archiver.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/pairofcrocs/steam-workshop-archiver/main/app/static/favicon.svg</Icon>
+  <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Metadata" Target="/meta" Default="/mnt/user/appdata/steam-workshop-archiver" Mode="rw" Description="Database, metadata, cached images and SteamCMD. Put it on a cache/SSD pool." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/steam-workshop-archiver</Config>
+  <Config Name="Downloads" Target="/downloads" Default="/mnt/user/steam-workshop" Mode="rw" Description="Downloaded Workshop content (large)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/steam-workshop</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Description="User ID files are written as" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Description="Group ID files are written as" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="America/New_York" Description="Timezone used for cron schedules" Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>
+  <Config Name="Auth password" Target="AUTH_PASSWORD" Default="" Description="Optional HTTP Basic auth password for the whole UI and API (any username)" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Steam Web API key" Target="STEAM_API_KEY" Default="" Description="Optional. Lists items via the official API (beyond the 30,000-item browse limit). Can also be set in Settings." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Allowed hosts" Target="ALLOWED_HOSTS" Default="auto" Description="Host header allowlist (DNS-rebinding protection). auto = IPs, localhost and LAN names; add your reverse-proxy domain, e.g. auto,archive.example.com" Type="Variable" Display="advanced" Required="false" Mask="false">auto</Config>
+</Container>

@@ -1,0 +1,100 @@
+{# Shared job fields, used by the New-job form and the saved-job dialog.
+   `p` prefixes ids; JS finds fields by data-f within the container. #}
+{% macro job_fields(p) %}
+<fieldset class="field field-full">
+  <legend class="label">Source</legend>
+  <div class="segmented">
+    <label><input type="radio" name="{{ p }}-source" value="workshop" data-f="source" checked><span>Whole Workshop</span></label>
+    <label><input type="radio" name="{{ p }}-source" value="collection" data-f="source"><span>Collection</span></label>
+    <label><input type="radio" name="{{ p }}-source" value="items" data-f="source"><span>Specific items</span></label>
+  </div>
+</fieldset>
+
+<div class="field field-full" data-source-panel="workshop">
+  <label class="label" for="{{ p }}-game">Game</label>
+  <div class="combo" data-combo>
+    <input id="{{ p }}-game" data-f="game" type="text" role="combobox" aria-autocomplete="list"
+           aria-expanded="false" aria-controls="{{ p }}-game-list" aria-describedby="{{ p }}-game-hint"
+           autocomplete="off" spellcheck="false" placeholder="Search a game, or paste a Steam URL / App ID">
+    <span class="spinner combo-spinner" data-combo-spinner hidden aria-hidden="true"></span>
+    <ul id="{{ p }}-game-list" class="combo-list" role="listbox" aria-label="Matching games" data-combo-list hidden></ul>
+  </div>
+  <div class="selected-game" data-selected hidden>
+    <span class="selected-label">Selected:</span>
+    <span class="chip chip-game">
+      <img data-selected-logo alt="" width="46" height="17" hidden>
+      <span data-selected-name></span>
+      <span class="mono muted" data-selected-appid></span>
+      <button type="button" class="chip-x" data-selected-clear aria-label="Clear selected game">✕</button>
+    </span>
+  </div>
+  <p class="hint" id="{{ p }}-game-hint">Only games with Steam Workshop support are listed. Pasting a store, Workshop item or collection URL fills things in for you.</p>
+</div>
+
+<div class="field field-full" data-source-panel="collection" hidden>
+  <label class="label" for="{{ p }}-collection">Collection URL or ID</label>
+  <div class="input-row">
+    <input id="{{ p }}-collection" data-f="collection" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+           placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=…">
+    <button type="button" class="btn btn-secondary" data-action="resolve-collection">Look up</button>
+  </div>
+  <p class="resolve-info" data-collection-info aria-live="polite"></p>
+</div>
+
+<div class="field field-full" data-source-panel="items" hidden>
+  <label class="label" for="{{ p }}-items">Workshop item URLs or IDs</label>
+  <textarea id="{{ p }}-items" data-f="items" rows="4" spellcheck="false" aria-describedby="{{ p }}-items-hint"
+            placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=123456789&#10;987654321"></textarea>
+  <p class="hint" id="{{ p }}-items-hint">One per line (commas or spaces also work). They must all belong to the same game.</p>
+  <p class="resolve-info" data-items-info aria-live="polite"></p>
+</div>
+
+<div class="field" data-workshop-only>
+  <label class="label" for="{{ p }}-sort">Browse sort</label>
+  <select id="{{ p }}-sort" data-f="sort">
+    <option value="trend">Most popular</option>
+    <option value="mostrecent">Most recent</option>
+    <option value="lastupdated">Last updated</option>
+    <option value="totaluniquesubscribers">Most subscribed</option>
+    <option value="random">Random</option>
+  </select>
+</div>
+
+<div class="field" data-workshop-only data-range-wrap>
+  <label class="label" for="{{ p }}-range">Time range</label>
+  <select id="{{ p }}-range" data-f="range">
+    <option value="today">Today</option>
+    <option value="week">One week</option>
+    <option value="month">Thirty days</option>
+    <option value="3months">Three months</option>
+    <option value="6months">Six months</option>
+    <option value="year">One year</option>
+    <option value="alltime">All time</option>
+  </select>
+</div>
+
+<div class="field" data-workshop-only>
+  <label class="label" for="{{ p }}-pages">Pages to scrape</label>
+  <input id="{{ p }}-pages" data-f="pages" type="text" inputmode="numeric" autocomplete="off" aria-describedby="{{ p }}-pages-hint">
+  <p class="hint" id="{{ p }}-pages-hint">About 30 items per page. A number, or "all".</p>
+</div>
+
+<div class="field">
+  <span class="label" id="{{ p }}-delay-label">Request delay (seconds)</span>
+  <div class="delay-row" role="group" aria-labelledby="{{ p }}-delay-label">
+    <input id="{{ p }}-delay-min" data-f="delayMin" type="number" min="0" step="0.1" inputmode="decimal" aria-label="Minimum delay in seconds">
+    <span class="muted">to</span>
+    <input id="{{ p }}-delay-max" data-f="delayMax" type="number" min="0" step="0.1" inputmode="decimal" aria-label="Maximum delay in seconds">
+  </div>
+  <p class="hint">A random pause between requests. Please go easy on Steam's servers.</p>
+</div>
+
+<fieldset class="field field-full">
+  <legend class="label">Mode</legend>
+  <div class="radio-list">
+    <label class="check"><input type="radio" name="{{ p }}-mode" value="both" data-f="mode" checked><span>Scrape the list, then download</span></label>
+    <label class="check"><input type="radio" name="{{ p }}-mode" value="scrape_only" data-f="mode"><span>Scrape only (update the list and metadata, no downloads)</span></label>
+    <label class="check"><input type="radio" name="{{ p }}-mode" value="download_only" data-f="mode"><span>Download only, using the last scraped list</span></label>
+  </div>
+</fieldset>
+{% endmacro %}

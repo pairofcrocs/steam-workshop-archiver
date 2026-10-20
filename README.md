@@ -1,235 +1,163 @@
 ![swa](https://github.com/user-attachments/assets/2ef39db4-421d-4942-ae09-b860d9890894)
 
-A self-hosted web app for archiving Steam Workshop content. Scrape item lists, download them via SteamCMD, browse your collection, and keep everything up to date with scheduled jobs — all from a browser.
+A self-hosted web app for archiving Steam Workshop content. List a game's Workshop (or a collection, or a handful of items), download it with SteamCMD or DepotDownloader, keep it up to date on a schedule, and browse everything offline — all from a browser.
 
-![Steam Workshop Archiver](https://img.shields.io/badge/docker-ready-blue) ![Python](https://img.shields.io/badge/python-3.10-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![License](https://img.shields.io/badge/license-Unlicense-lightgrey)
+![Docker](https://img.shields.io/badge/docker-amd64%20%7C%20arm64-blue) ![Python](https://img.shields.io/badge/python-3.12-blue) ![License](https://img.shields.io/badge/license-Unlicense-lightgrey)
 
 ![Dashboard](screenshots/dashboard.png)
 
 | | |
 |---|---|
-| ![Workshop Browser — Portal 2](screenshots/browser-portal2.png) | ![Workshop Browser — CoD BO3](screenshots/browser-bo3.png) |
-| ![Item Detail](screenshots/item-detail.png) | ![Edit Job](screenshots/edit-job.png) |
+| ![Workshop browser](screenshots/browser.png) | ![Item detail](screenshots/item-detail.png) |
+| ![Scheduled job editor](screenshots/schedule.png) | ![Mobile](screenshots/mobile.png) |
 
-> **Vibe coded.** This is a vibe-coded project from start to finish. AI-assisted, minimal planning, zero ceremony. Functionally, it’s just a lightweight wrapper around SteamCMD with an archive browsing interface. It’s meant to be useful, not over-engineered.
+> **Vibe coded.** AI-assisted, minimal ceremony. It's a wrapper around SteamCMD/DepotDownloader with an archive browser — meant to be useful, not over-engineered.
 
 ---
 
 ## Features
 
-- **Scrape & Download** — Search for any Steam game, scrape its Workshop item list, and download everything via SteamCMD (anonymous, no Steam account required)
-- **Flexible Browse Sorting** — Choose exactly how items are scraped, mirroring Steam's own sort options (see below)
-- **Workshop Browser** — Browse your archived items in a card grid with preview images, tag filters, search, and sorting
-- **Scheduled Jobs** — Set up recurring archives on a fixed interval or a cron expression (e.g. `0 3 * * *`)
-- **Metadata & Images** — Fetches titles, descriptions, tags, and preview images from the Steam Web API; caches description images locally for offline browsing
-- **BB Code Rendering** — Workshop descriptions are rendered with full BB code support (`[b]`, `[i]`, `[img]`, `[url]`, `[list]`, headings, etc.)
-- **Size Estimation** — Optionally fetch total download size before committing, with a confirmation gate (manual jobs only)
-- **Real-time Logs** — Live streaming log output during scrape/download jobs via Server-Sent Events
-- **Item Management** — Download items as ZIP files, delete individual items, or wipe an entire game archive
-- **Steam-themed UI** — Dark interface that fits right in with the Steam aesthetic
+- **Three kinds of jobs** — a game's whole Workshop (with Steam's sort options), a **collection** (nested collections included), or a pasted list of item URLs/IDs. Paste a store, Workshop, item or collection URL straight into the search box.
+- **Incremental updates** — every run checks Steam for each item's last-updated time and only downloads what's new or changed. Items removed from the Workshop are flagged and their local copies kept.
+- **Official API or scraping** — with an optional free [Steam Web API key](https://steamcommunity.com/dev/apikey) items are listed through `IPublishedFileService/QueryFiles` (no 30,000-item browse limit, metadata in the same call); without one the browse pages are scraped.
+- **Two download backends** — SteamCMD (batched, the default on x86) or [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (also runs on arm64). Legacy single-file items are fetched straight from Steam's CDN.
+- **Reliable downloads** — retries with backoff, stall detection, cancel that actually stops SteamCMD, and a clear hint when a game's Workshop needs an account that owns it.
+- **Optional Steam login** — cache a login once (`swa-steam-login`) for games that don't allow anonymous downloads.
+- **Queue & history** — jobs queue instead of colliding; every run is kept with counts, a full log, and **Retry failed**.
+- **Schedules** — interval or cron (in your `TZ`) with a live preview of the next runs. Several schedules per game (e.g. one per collection).
+- **Live progress** — progress bar, ETA, per-outcome counts and a streaming log that survives reloads and multiple tabs.
+- **Notifications** — Discord, ntfy, Gotify, email, … via [Apprise](https://github.com/caronc/apprise/wiki) URLs, on every run or failures only.
+- **Workshop browser** — fast paged grid with search, tag filters (any/all), sort, filters for outdated / removed / missing metadata, bulk select → download as one ZIP, re-download or delete. Filters live in the URL so views are linkable.
+- **Offline-friendly metadata** — titles, descriptions (safe BBCode rendering), tags, preview and description images cached locally.
+- **Disk usage** overview, mobile-friendly UI, keyboard accessible.
 
 ---
 
-## Browse Sort Options
-
-When starting a job you can choose how Workshop items are sorted during scraping — matching Steam's own filter options exactly:
-
-| Sort | Options |
-|---|---|
-| **Most Popular** | Today / One Week / Thirty Days / Three Months / Six Months / One Year / All Time |
-| **Most Recent** | — |
-| **Last Updated** | — |
-| **Most Subscribed** | — |
-| **Random** | Scrapes all-time items and shuffles the results before saving |
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/)
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/pairofcrocs/steam-workshop-archiver.git
-cd steam-workshop-archiver
-```
-
-### 2. Configure `docker-compose.yml`
-
-Edit the volume paths and timezone to match your setup:
+## Quick start
 
 ```yaml
+# docker-compose.yml
 services:
   steam-archiver:
-    build: .
+    image: ghcr.io/pairofcrocs/steam-workshop-archiver:latest
+    container_name: steam-archiver
     ports:
       - "8080:8080"
     volumes:
-      - ./meta:/meta           # metadata, CSV lists, cached images
-      - ./downloads:/downloads # large SteamCMD downloads
+      - ./meta:/meta           # database, metadata, images, SteamCMD (fast disk)
+      - ./downloads:/downloads # Workshop content (big disk)
     environment:
-      - TZ=America/New_York    # set your timezone (affects cron schedules)
+      - TZ=America/New_York
+      - PUID=1000
+      - PGID=1000
     restart: unless-stopped
 ```
-
-> **Tip (Unraid / NAS users):** Point `/meta` at a fast SSD cache drive and `/downloads` at your array storage. Metadata files are read/written frequently; downloaded workshop content is large but rarely accessed randomly.
-
-### 3. Build and run
 
 ```bash
 docker compose up -d
 ```
 
-The app will be available at **http://localhost:8080**.
+Open **http://localhost:8080**. Images are published for `linux/amd64` and `linux/arm64` (SteamCMD only exists for x86, so arm64 uses DepotDownloader).
+
+**Unraid:** add `https://github.com/pairofcrocs/unraid-templates` under Docker → Template Repositories, then add **Steam-Workshop-Archiver** (also in [`unraid/`](unraid/steam-workshop-archiver.xml)) (PUID 99 / PGID 100, `/meta` on the cache pool, `/downloads` on the array).
+
+To build locally instead: `docker build -t steam-workshop-archiver .`
 
 ---
 
 ## Usage
 
-### Archiving a game
+1. **Start a job.** Search for a game (or paste a URL / App ID), pick *Whole Workshop*, *Collection* or *Specific items*, choose sort and page count, and press **Start**. Tick *Estimate size and confirm* to review the download size first.
+2. **Watch it run.** The job panel shows progress, counts and the live log. Other jobs wait in the queue.
+3. **Browse.** Click **Browse** on a game to search, filter and open items, download them as ZIPs, or bulk-delete.
+4. **Schedule.** *Save as scheduled job* turns the form into a recurring job (interval or cron). Scheduled runs only download new or updated items.
+5. **History.** Every run is listed with its log; **Retry failed** re-queues just the items that failed.
 
-1. Open the app and type a game name into the search box — it will autocomplete against the Steam store.
-2. Choose a **Browse Sort** and (for Most Popular) a **Time Range**.
-3. Choose how many pages of Workshop items to scrape (or `all`).
-4. Optionally enable **Fetch sizes** to see the total download size before it starts.
-5. Click **Start** and watch the live log. If you enabled size fetching, approve the download when prompted.
-6. Once complete, the game appears in your **Downloads** list.
+### Games that need a Steam account
 
-### Browsing your archive
+Many games allow anonymous Workshop downloads; some (often paid games) don't — runs then fail with *Access Denied* and the UI shows a hint. To use an account that owns the game:
 
-Click **Browse** next to any game to open the Workshop browser. From there you can:
+```bash
+docker exec -it steam-archiver swa-steam-login <your-steam-username>
+```
 
-- Search and filter items by title or tag
-- Sort by name, size, or date updated
-- Click any card to open a detail modal with the full description, preview image, and a link to the original Steam page
-- Download an item as a ZIP or delete it individually
+Enter your password and Steam Guard code when prompted. Credentials are cached under `/meta` (never stored by the app). Then set the **Steam username** in **Settings**. For the DepotDownloader backend, also pass any Workshop item of that game so it caches its own login: `swa-steam-login <user> <appid> <item_id>`.
 
-### Scheduled jobs
+### Steam Web API key (optional)
 
-Click **Save Job** on the main form, or the **save icon** (or **Edit**) next to a game in the Downloads list to configure a recurring schedule:
-
-- **Interval** — re-run every N hours (e.g. `24` for daily)
-- **Cron** — standard 5-field cron expression (e.g. `0 3 * * 0` for 3 AM every Sunday)
-
-The scheduler checks for due jobs every 60 seconds. Sort settings are saved per-job and respected on each run. Size estimation is not available for scheduled jobs — downloads proceed automatically without a confirmation step.
-
-### Refreshing metadata / migrating description images
-
-If you have existing archives that were downloaded before metadata was fetched, open the Workshop browser for that game and click **Fetch Metadata**. This will:
-
-1. Pull titles, descriptions, tags, and preview images from the Steam Web API for any items not yet cached
-2. Download all images embedded in item descriptions and cache them locally
-
-New downloads automatically trigger this step at the end of each job.
+Without a key the app scrapes the Workshop browse pages, which Steam caps at 1,000 pages (~30,000 items). With a key (free from <https://steamcommunity.com/dev/apikey>) listing goes through the official API with no cap. Set it in **Settings** or via `STEAM_API_KEY`.
 
 ---
 
-## Data Layout
+## Configuration
 
-```
-/meta/
-├── saved_jobs.json                     # Persisted scheduled jobs
-└── games/{appid}/
-    ├── data.csv                        # Scraped Workshop item manifest
-    ├── metadata.json                   # Steam API metadata cache
-    ├── previews/{item_id}.jpg          # Item preview images
-    └── desc_images/{item_id}/
-        ├── map.json                    # URL → local filename mapping
-        └── {hash}.jpg / .png / ...     # Cached description images
-
-/downloads/
-└── steamapps/workshop/content/{appid}/
-    ├── {item_id}/                      # Directory-based items
-    └── {item_id}.bin                   # Binary items
-```
-
----
-
-## Environment Variables
+Environment variables (UI-editable settings can also be changed in **Settings**, which take precedence):
 
 | Variable | Default | Description |
 |---|---|---|
-| `TZ` | `UTC` | Timezone for cron schedule evaluation |
-| `PUID` | `0` | UID to run as — files written to volumes will be owned by this user |
-| `PGID` | `0` | GID to run as — files written to volumes will belong to this group |
-| `META_DIR` | `/meta` | Path for metadata, CSVs, and cached images |
-| `DOWNLOADS_DIR` | `/downloads` | Path for SteamCMD workshop downloads |
-| `STEAMCMD_PATH` | `/opt/steamcmd/steamcmd.sh` | Path to the SteamCMD executable |
-| `AUTH_PASSWORD` | _(unset)_ | When set, enables HTTP Basic Auth on all routes. Leave unset for open LAN access. |
+| `TZ` | `UTC` | Timezone for cron schedules |
+| `PUID` / `PGID` | `1000` | User/group files are written as (Unraid: `99`/`100`; `0` runs as root) |
+| `AUTH_PASSWORD` | _(unset)_ | Enables HTTP Basic auth on everything except `/healthz` (any username) |
+| `ALLOWED_HOSTS` | `auto` | Host header allowlist (DNS-rebinding protection). `auto` accepts IP addresses, `localhost` and LAN names (`tower`, `*.local`, `*.lan`, `*.home.arpa`, …). Add real domains you use, e.g. `auto,archive.example.com` behind a reverse proxy; `*` disables the check |
+| `STEAM_API_KEY` | _(unset)_ | Steam Web API key (Settings) |
+| `DOWNLOAD_BACKEND` | auto | `steamcmd` or `depotdownloader` (Settings) |
+| `STEAM_USERNAME` | _(unset)_ | Use cached credentials for this account instead of anonymous (Settings) |
+| `HTTP_DIRECT` | `1` | Fetch legacy single-file items straight from Steam's CDN (Settings) |
+| `MAX_RETRIES` | `3` | Retry rounds per failed item (Settings) |
+| `STALL_TIMEOUT_MIN` | `20` | Kill a download that shows no output or disk growth for this long (Settings) |
+| `CONFIRM_TIMEOUT_MIN` | `60` | A size confirmation not answered in time cancels the run (Settings) |
+| `METADATA_TTL_HOURS` | `24` | Re-fetch item metadata older than this (Settings) |
+| `NOTIFY_URLS` | _(unset)_ | Space-separated Apprise URLs (Settings) |
+| `NOTIFY_ON` | `all` | `all`, `failures` or `never` (Settings) |
+| `FIX_PERMISSIONS` | `auto` | `auto` chowns everything only when PUID/PGID change; `full` every start; `off` never |
+| `META_DIR` / `DOWNLOADS_DIR` | `/meta` / `/downloads` | Data paths |
+| `LOG_LEVEL` | `INFO` | Server log level |
 
-> **Unraid users:** Set `PUID=99` and `PGID=100` (the `nobody`/`users` defaults) so all files written to your shares are owned by the correct user and you can manage them without permission errors.
+### Data layout
 
----
+```
+/meta/
+├── archiver.db                    # SQLite: settings, schedules, run history, item metadata
+├── logs/run-<id>.log              # full log of every run
+├── steamcmd/                      # SteamCMD (self-updates + cached logins persist here)
+├── home/                          # $HOME for SteamCMD / DepotDownloader
+└── games/<appid>/
+    ├── data.csv                   # last complete Workshop listing
+    ├── previews/<item>.jpg
+    └── desc_images/<item>/…       # cached description images + map.json
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.10, FastAPI, Uvicorn |
-| Templating | Jinja2 |
-| HTTP | Requests (with retry logic) |
-| Scheduling | croniter |
-| Downloader | SteamCMD (bundled in Docker image) |
-| Frontend | Vanilla HTML / CSS / JavaScript |
-| Deployment | Docker (Ubuntu 22.04 base) |
-
----
-
-## API Reference
-
-<details>
-<summary>Click to expand</summary>
-
-### Jobs
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/jobs/start` | Start a new archive job |
-| `POST` | `/jobs/cancel` | Cancel the running job |
-| `POST` | `/jobs/confirm` | Confirm download after size check |
-| `GET` | `/jobs/status` | Get current job status |
-| `GET` | `/jobs/stream` | SSE stream of live log output |
-
-### Archives
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/workshop` | List all downloaded archives |
-| `GET` | `/api/workshop/{appid}` | List items for a game |
-| `DELETE` | `/api/workshop/{appid}` | Delete entire game archive |
-| `DELETE` | `/api/workshop/{appid}/items/{item_id}` | Delete a single item |
-| `POST` | `/api/workshop/{appid}/fetch-metadata` | Trigger background metadata fetch |
-
-### File Serving
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/workshop/{appid}` | Workshop browser page |
-| `GET` | `/workshop-download/{appid}/{item_id}` | Download item as ZIP or .bin |
-| `GET` | `/api/workshop/{appid}/desc-images/{item_id}/{filename}` | Serve cached description image |
-
-### Saved Jobs
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/saved-jobs` | List saved jobs |
-| `POST` | `/api/saved-jobs` | Create or update a saved job |
-| `PUT` | `/api/saved-jobs/{job_id}` | Update job settings |
-| `DELETE` | `/api/saved-jobs/{job_id}` | Delete a saved job |
-| `POST` | `/api/saved-jobs/{job_id}/run` | Run a saved job immediately |
-
-</details>
+/downloads/steamapps/workshop/
+├── appworkshop_<appid>.acf        # SteamCMD's manifest
+└── content/<appid>/<item>/        # one folder per item (or <item>.bin for legacy items)
+```
 
 ---
 
-## Notes
+## Upgrading from v1
 
-- Downloads are **anonymous** — no Steam account or API key is required.
-- SteamCMD is bundled inside the Docker image; nothing needs to be installed on the host.
-- Only one archive job runs at a time. Starting a second job while one is running will return an error; the scheduler skips its cycle and retries after 60 seconds.
-- The scheduler is in-process; restarting the container re-reads `saved_jobs.json` and resumes scheduling automatically.
+- Saved jobs (`saved_jobs.json`) and metadata caches (`games/*/metadata.json`) are imported into `archiver.db` on first start and renamed to `*.imported`.
+- Containers now run as `PUID`/`PGID` **1000** by default instead of root. Set `PUID=0` to keep the old behaviour. Ownership is fixed automatically the first time.
+- The HTTP API changed (`/jobs/*` → `/api/runs`, …). See [docs/api.md](docs/api.md).
 
----
+## Security notes
+
+- The app is meant for your LAN. Set `AUTH_PASSWORD` if anyone else can reach it. Requests for unknown domain names are refused by default (DNS-rebinding protection) — if you put it behind a reverse proxy with a real domain, add that domain to `ALLOWED_HOSTS`.
+- All state-changing API requests must send the header `X-SWA: 1` (CSRF protection). Scripts using the API need to add it.
+- Workshop descriptions are untrusted: they're rendered with a DOM-based BBCode renderer under a strict Content-Security-Policy, and the server only fetches description images from public internet hosts.
+
+## API
+
+See [docs/api.md](docs/api.md).
+
+## Development
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+META_DIR=./meta DOWNLOADS_DIR=./downloads .venv/bin/uvicorn app.main:app --reload --port 8080
+.venv/bin/ruff check . && .venv/bin/pytest
+node --test 'tests/js/*.test.mjs'
+```
 
 ## License
 
-[Unlicense](LICENSE) — public domain, no restrictions.
+[Unlicense](LICENSE) — public domain.

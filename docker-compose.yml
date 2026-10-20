@@ -1,13 +1,17 @@
 services:
   steam-archiver:
-    build: .
+    image: ghcr.io/pairofcrocs/steam-workshop-archiver:latest
+    # build: .                       # or build locally instead of pulling
+    container_name: steam-archiver
     ports:
       - "8080:8080"
     volumes:
-      - ./meta:/meta               # point this at your fast cache drive
-      - ./downloads:/downloads     # point this at your Unraid array
+      - ./meta:/meta               # database, metadata, images, SteamCMD (fast disk)
+      - ./downloads:/downloads     # Workshop content (big disk)
     environment:
-      - TZ=America/New_York        # set your timezone — affects cron schedule times
-      - PUID=99                    # UID of the user that should own created files (Unraid: 99)
-      - PGID=100                   # GID of the group that should own created files (Unraid: 100)
+      - TZ=America/New_York        # cron schedules run in this timezone
+      - PUID=1000                  # Unraid: 99
+      - PGID=1000                  # Unraid: 100
+      # - AUTH_PASSWORD=change-me  # HTTP Basic auth for the whole UI/API
+      # - STEAM_API_KEY=...        # optional; can also be set in Settings
     restart: unless-stopped

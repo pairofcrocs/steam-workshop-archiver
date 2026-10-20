@@ -1,0 +1,37 @@
+#!/bin/bash
+# Log in to Steam once, interactively, so downloads can reuse the cached credentials.
+#   docker exec -it steam-archiver swa-steam-login <username> [<appid> <item_id>]
+# The optional appid/item_id also caches a DepotDownloader login (needed only for that backend).
+set -euo pipefail
+
+user="${1:-}"
+if [ -z "$user" ]; then
+    echo "usage: swa-steam-login <steam-username> [<appid> <workshop-item-id>]" >&2
+    exit 1
+fi
+META_DIR=${META_DIR:-/meta}
+export HOME="$META_DIR/home"
+
+run() {
+    if [ "$(id -u)" = "0" ] && [ "${PUID:-1000}" != "0" ]; then
+        gosu "${PUID:-1000}:${PGID:-1000}" "$@"
+    else
+        "$@"
+    fi
+}
+
+if [ -x "${STEAMCMD_PATH:-}" ]; then
+    echo "== SteamCMD: enter your password and Steam Guard code when asked =="
+    run "$STEAMCMD_PATH" +login "$user" +quit
+fi
+
+if [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -x "${DEPOTDOWNLOADER_PATH:-}" ]; then
+    echo "== DepotDownloader: enter your password and Steam Guard code when asked =="
+    tmp=$(mktemp -d)
+    chown "${PUID:-1000}:${PGID:-1000}" "$tmp" 2>/dev/null || true
+    run "$DEPOTDOWNLOADER_PATH" -username "$user" -remember-password -app "$2" -pubfile "$3" -manifest-only -dir "$tmp" || true
+    rm -rf "$tmp"
+fi
+
+echo
+echo "Done. Open Settings in the web UI and set the Steam username to: $user"

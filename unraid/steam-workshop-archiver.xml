@@ -11,6 +11,7 @@
   <Overview>Self-hosted Steam Workshop archiver: list a game's Workshop (or a collection / item list), download it with SteamCMD or DepotDownloader, keep it updated on a schedule, and browse it offline.</Overview>
   <Category>Downloaders: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/pairofcrocs/unraid-templates/main/Steam-Workshop-Archiver.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/pairofcrocs/steam-workshop-archiver/main/app/static/favicon.svg</Icon>
   <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
   <Config Name="Metadata" Target="/meta" Default="/mnt/user/appdata/steam-workshop-archiver" Mode="rw" Description="Database, metadata, cached images and SteamCMD. Put it on a cache/SSD pool." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/steam-workshop-archiver</Config>

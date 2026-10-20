@@ -59,7 +59,7 @@ docker compose up -d
 
 Open **http://localhost:8080**. Images are published for `linux/amd64` and `linux/arm64` (SteamCMD only exists for x86, so arm64 uses DepotDownloader).
 
-**Unraid:** a template is in [`unraid/steam-workshop-archiver.xml`](unraid/steam-workshop-archiver.xml) (PUID 99 / PGID 100, `/meta` on the cache pool, `/downloads` on the array).
+**Unraid:** add `https://github.com/pairofcrocs/unraid-templates` under Docker → Template Repositories, then add **Steam-Workshop-Archiver** (also in [`unraid/`](unraid/steam-workshop-archiver.xml)) (PUID 99 / PGID 100, `/meta` on the cache pool, `/downloads` on the array).
 
 To build locally instead: `docker build -t steam-workshop-archiver .`
 

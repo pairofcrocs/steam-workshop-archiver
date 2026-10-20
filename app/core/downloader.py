@@ -1,314 +1,398 @@
-"""SteamCMD download logic."""
+"""Download backends: SteamCMD (batched), DepotDownloader, and direct HTTP for
+legacy single-file items. All share retry/backoff, cancellation and stall detection."""
 
-import csv
 import os
+import queue
 import random
+import re
+import shutil
+import signal
 import subprocess
+import tempfile
+import threading
 import time
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
-from .utils import (
-    DownloadVerifySnapshot,
-    extract_workshop_id,
-    load_workshop_metadata_times,
-    take_verify_snapshot,
-    verify_downloaded_items,
-    workshop_item_satisfied,
+from .. import config
+from . import archive
+from .net import DownloadError, safe_download
+
+STEAMCMD_BATCH = 30
+_STALL_CHECK_SECS = 30
+
+_SC_SUCCESS_RE = re.compile(r"Success\. Downloaded item (\d+)")
+_SC_ERROR_RE = re.compile(r"ERROR! Download item (\d+) failed \(([^)]*)\)")
+_OWNERSHIP_REASONS = ("access denied", "no subscription", "accessdenied", "nosubscription")
+_LOGIN_FAILURE_RE = re.compile(
+    r"(Cached credentials not found|password:|Two-factor code|Steam Guard code|"
+    r"Invalid Password|FAILED \(Invalid Login|Login Failure|InvalidPassword)",
+    re.IGNORECASE,
 )
 
-# One workshop browse page = 30 items; batch SteamCMD invocations accordingly.
-_BATCH_SIZE = 30
+OWNERSHIP_HINT = (
+    "Steam refused these downloads. This game's Workshop probably requires a Steam "
+    "account that owns the game: cache a login with `swa-steam-login <username>` "
+    "and set the Steam username in Settings."
+)
+LOGIN_HINT = (
+    "SteamCMD/DepotDownloader couldn't log in with the cached credentials. Run "
+    "`docker exec -it <container> swa-steam-login <username>` to log in once (Steam Guard "
+    "prompts are handled there), or clear the Steam username in Settings to use anonymous login."
+)
 
 
-def _build_steamcmd_command(
-    steamcmd_path: str,
-    downloads_dir: str,
-    appid: str,
-    workshop_ids: list[str],
-) -> list[str]:
-    """Build a single SteamCMD invocation for one or more workshop items."""
-    cmd = [
-        steamcmd_path,
-        "+force_install_dir", downloads_dir,
-        "+login", "anonymous",
-    ]
-    for workshop_id in workshop_ids:
-        cmd.extend(["+workshop_download_item", appid, workshop_id])
-    cmd.append("+quit")
-    return cmd
+@dataclass
+class Task:
+    item_id: str
+    title: str = ""
+    time_updated: int = 0
+    file_url: str = ""
+    filename: str = ""
+    force: bool = False  # re-download: only an explicit success line counts
 
 
-def _run_steamcmd(
+@dataclass
+class Context:
+    appid: str
+    log: Callable[[str], None]
+    cancel_event: threading.Event
+    on_result: Callable[[str, bool, str], None]
+    settings: dict
+    delay_min: float = 1.0
+    delay_max: float = 2.5
+    hints: set[str] = field(default_factory=set)
+
+    def cancelled(self) -> bool:
+        return self.cancel_event.is_set()
+
+    def sleep(self, seconds: float) -> bool:
+        """Cancellable sleep; True if cancelled."""
+        return self.cancel_event.wait(max(0.0, seconds))
+
+    def polite_pause(self) -> bool:
+        lo, hi = sorted((self.delay_min, self.delay_max))
+        return self.sleep(random.uniform(lo, hi))
+
+
+# ---------------------------------------------------------------------------
+# Process runner
+# ---------------------------------------------------------------------------
+@dataclass
+class ProcessOutcome:
+    returncode: int | None
+    cancelled: bool = False
+    stalled: bool = False
+    lines: list[str] = field(default_factory=list)
+
+
+def _dir_size(path: str) -> int:
+    total = 0
+    for root, _d, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    for sig, wait in ((signal.SIGTERM, 5), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=wait)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def run_process(
     cmd: list[str],
-    log_fn: Callable[[str], None],
-    cancel_check: Callable[[], bool] | None,
-) -> bool:
-    """Run SteamCMD, streaming stdout to the log. Returns True if cancelled."""
-    process = subprocess.Popen(
+    ctx: Context,
+    stall_timeout: float,
+    activity_paths: list[str],
+    prefix: str,
+    env: dict | None = None,
+) -> ProcessOutcome:
+    """Run *cmd* in its own process group, streaming output to the log. Killed on
+    cancel, or when there's no output and no growth in *activity_paths* for
+    *stall_timeout* seconds."""
+    proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        universal_newlines=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+        env=env,
     )
+    lines: queue.Queue[str | None] = queue.Queue()
 
-    cancelled = False
+    def reader():
+        assert proc.stdout is not None
+        for raw in iter(proc.stdout.readline, b""):
+            lines.put(raw.decode("utf-8", errors="replace").rstrip())
+        lines.put(None)
+
+    threading.Thread(target=reader, daemon=True).start()
+    outcome = ProcessOutcome(returncode=None)
+    last_activity = time.monotonic()
+    last_check = last_activity
+    last_size = sum(_dir_size(p) for p in activity_paths)
     try:
-        for line in process.stdout:
-            line = line.rstrip("\n")
-            if line.strip():
-                log_fn(f"  steamcmd: {line.strip()}")
-            if cancel_check and cancel_check():
-                log_fn("Download cancelled — SteamCMD process terminated.")
-                cancelled = True
+        while True:
+            try:
+                line = lines.get(timeout=1)
+            except queue.Empty:
+                line = ""
+            if line is None:
+                break
+            if line:
+                last_activity = time.monotonic()
+                outcome.lines.append(line)
+                ctx.log(f"  {prefix}: {line}")
+                if _LOGIN_FAILURE_RE.search(line):
+                    ctx.hints.add(LOGIN_HINT)
+            if ctx.cancelled():
+                outcome.cancelled = True
+                break
+            now = time.monotonic()
+            if now - last_check >= _STALL_CHECK_SECS:
+                last_check = now
+                size = sum(_dir_size(p) for p in activity_paths)
+                if size != last_size:
+                    last_size = size
+                    last_activity = now
+            if now - last_activity > stall_timeout:
+                outcome.stalled = True
+                ctx.log(f"  {prefix}: no progress for {int(stall_timeout // 60)} min — stopping it.")
                 break
     finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait()
-
-    return cancelled
-
-
-def _sleep_between_requests(
-    pause: float,
-    resume: float,
-    log_fn: Callable[[str], None],
-    cancel_check: Callable[[], bool] | None,
-) -> bool:
-    """Sleep for a random delay. Returns True if cancelled before/during sleep."""
-    if cancel_check and cancel_check():
-        return True
-    delay = random.uniform(pause, resume)
-    log_fn(f"Waiting {delay:.1f}s before next request...")
-    time.sleep(delay)
-    return bool(cancel_check and cancel_check())
-
-
-def _retry_items_individually(
-    items: list[tuple[str, str, str]],
-    steamcmd_path: str,
-    downloads_dir: str,
-    appid: str,
-    api_times: dict[str, int],
-    pause: float,
-    resume: float,
-    log_fn: Callable[[str], None],
-    cancel_check: Callable[[], bool] | None,
-) -> tuple[set[str], bool]:
-    """Retry unsatisfied items one at a time. Returns (succeeded_ids, cancelled)."""
-    succeeded: set[str] = set()
-
-    for index, (file_name, _item_url, workshop_id) in enumerate(items):
-        if cancel_check and cancel_check():
-            return succeeded, True
-
-        log_fn(f"Retrying individually: {workshop_id} — {file_name}")
-        snapshot = take_verify_snapshot(downloads_dir, appid, [workshop_id])
-        cmd = _build_steamcmd_command(steamcmd_path, downloads_dir, appid, [workshop_id])
-        cancelled = _run_steamcmd(cmd, log_fn, cancel_check)
-        if cancelled:
-            return succeeded, True
-
-        if workshop_item_satisfied(
-            workshop_id,
-            snapshot,
-            downloads_dir,
-            appid,
-            api_times.get(workshop_id, 0),
-        ):
-            succeeded.add(workshop_id)
-        else:
-            log_fn(f"  Item not satisfied after individual retry: {workshop_id}")
-
-        if index < len(items) - 1:
-            if _sleep_between_requests(pause, resume, log_fn, cancel_check):
-                return succeeded, True
-
-    return succeeded, False
-
-
-def download_workshop_items(
-    workshop_list_file: str,
-    steamcmd_path: str,
-    appid: str,
-    downloads_dir: str,
-    meta_dir: str = "",
-    delay_min: float = 1.0,
-    delay_max: float = 2.5,
-    log_fn: Callable[[str], None] | None = None,
-    cancel_check: Callable[[], bool] | None = None,
-) -> bool:
-    """
-    Download every item listed in the CSV via SteamCMD (anonymous login).
-
-    Items are downloaded in batches of up to 30 per SteamCMD invocation. Success
-    is verified from disk state: new items must appear locally; pre-existing items
-    must be updated this run or already match cached workshop time_updated metadata.
-    Unsatisfied items are retried individually. A random delay between batches and
-    retries matches the scrape hammering-protection settings.
-
-    Returns True if all items succeeded, False if any failed.
-    """
-    if log_fn is None:
-        import logging
-        log_fn = logging.getLogger(__name__).info
-
-    if not os.path.isfile(workshop_list_file):
-        log_fn(f"ERROR: Workshop list not found: {workshop_list_file}")
-        return False
-
-    if not os.path.isfile(steamcmd_path):
-        log_fn(f"ERROR: SteamCMD not found at: {steamcmd_path}")
-        return False
-
-    os.makedirs(downloads_dir, exist_ok=True)
-
-    with open(workshop_list_file, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)  # skip header
-        workshop_items = [(row[0], row[1]) for row in reader if len(row) >= 2]
-
-    if not workshop_items:
-        log_fn(f"WARNING: No workshop items found in {workshop_list_file}")
-        return True
-
-    failed: list[tuple[str, str]] = []
-    queue: list[tuple[str, str, str]] = []
-
-    for file_name, item_url in workshop_items:
-        workshop_id = extract_workshop_id(item_url)
-        if not workshop_id:
-            log_fn(f"WARNING: Could not extract workshop ID from: {item_url} — skipping.")
-            failed.append((file_name, item_url))
-            continue
-        queue.append((file_name, item_url, workshop_id))
-
-    total = len(queue) + len(failed)
-    if not queue:
-        log_fn("No valid workshop items to download.")
-        return len(failed) == 0
-
-    api_times = load_workshop_metadata_times(meta_dir, appid) if meta_dir else {}
-
-    batch_count = (len(queue) + _BATCH_SIZE - 1) // _BATCH_SIZE
-    log_fn(
-        f"Download queue starting — {len(queue)} items "
-        f"in {batch_count} batch{'es' if batch_count != 1 else ''} "
-        f"(up to {_BATCH_SIZE} per SteamCMD call)"
-    )
-
-    processed = len(failed)
-    pause = min(delay_min, delay_max)
-    resume = max(delay_min, delay_max)
-    cancelled = False
-
-    for batch_index in range(batch_count):
-        if cancel_check and cancel_check():
-            log_fn("Download cancelled by user.")
-            cancelled = True
-            break
-
-        batch_start = batch_index * _BATCH_SIZE
-        batch = queue[batch_start: batch_start + _BATCH_SIZE]
-        batch_ids = [workshop_id for _, _, workshop_id in batch]
-        batch_end = batch_start + len(batch)
-
-        log_fn(
-            f"Batch {batch_index + 1}/{batch_count}: "
-            f"downloading {len(batch)} items [{batch_start + 1}–{batch_end}/{len(queue)}]"
-        )
-        for offset, (file_name, _, workshop_id) in enumerate(batch, start=1):
-            log_fn(f"  [{batch_start + offset}/{len(queue)}] {workshop_id} — {file_name}")
-
-        snapshot: DownloadVerifySnapshot = take_verify_snapshot(
-            downloads_dir, appid, batch_ids
-        )
-        cmd = _build_steamcmd_command(steamcmd_path, downloads_dir, appid, batch_ids)
-
+        if proc.poll() is None:
+            _kill_group(proc)
         try:
-            batch_cancelled = _run_steamcmd(cmd, log_fn, cancel_check)
-        except FileNotFoundError:
-            log_fn(f"ERROR: SteamCMD executable not found: {steamcmd_path}")
-            return False
-        except Exception as exc:
-            log_fn(f"ERROR: Unexpected error running SteamCMD batch: {exc}")
-            for file_name, item_url, _workshop_id in batch:
-                processed += 1
-                failed.append((file_name, item_url))
-            if cancel_check and cancel_check():
-                cancelled = True
-                break
-            continue
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    outcome.returncode = proc.returncode
+    return outcome
 
-        if batch_cancelled:
-            cancelled = True
 
-        satisfied = verify_downloaded_items(
-            batch_ids, snapshot, downloads_dir, appid, api_times
-        )
+# ---------------------------------------------------------------------------
+# Retry orchestration
+# ---------------------------------------------------------------------------
+AttemptFn = Callable[[list[Task]], dict[str, tuple[bool, str]]]
 
-        retry_items = [
-            (file_name, item_url, workshop_id)
-            for file_name, item_url, workshop_id in batch
-            if workshop_id not in satisfied
-        ]
 
-        if retry_items and not cancelled:
-            log_fn(
-                f"Verified: {len(satisfied)}/{len(batch)} satisfied — "
-                f"retrying {len(retry_items)} item(s) individually"
-            )
-            retried_ids, retry_cancelled = _retry_items_individually(
-                retry_items,
-                steamcmd_path,
-                downloads_dir,
-                appid,
-                api_times,
-                pause,
-                resume,
-                log_fn,
-                cancel_check,
-            )
-            satisfied |= retried_ids
-            if retry_cancelled:
-                cancelled = True
-
-        for file_name, item_url, workshop_id in batch:
-            if workshop_id in satisfied:
-                processed += 1
-                if workshop_id in snapshot.preexisting:
-                    log_fn(f"Up to date: {file_name}")
+def _with_retries(tasks: list[Task], attempt: AttemptFn, batch_size: int, ctx: Context) -> None:
+    """First pass in batches, then up to max_retries individual attempts with backoff."""
+    max_retries = int(ctx.settings.get("max_retries", 3))
+    pending = list(tasks)
+    for round_no in range(max_retries + 1):
+        if not pending or ctx.cancelled():
+            return
+        size = batch_size if round_no == 0 else 1
+        if round_no > 0:
+            backoff = min(300, 10 * 2 ** (round_no - 1))
+            ctx.log(f"Retry round {round_no}/{max_retries} for {len(pending)} item(s) in {backoff}s...")
+            if ctx.sleep(backoff):
+                return
+        failed: list[Task] = []
+        for start in range(0, len(pending), size):
+            if ctx.cancelled():
+                return
+            batch = pending[start:start + size]
+            results = attempt(batch)
+            for t in batch:
+                ok, reason = results.get(t.item_id, (False, "no result"))
+                if ok:
+                    ctx.on_result(t.item_id, True, "")
+                elif ctx.cancelled():
+                    continue
+                elif round_no == max_retries or _is_permanent(reason):
+                    ctx.on_result(t.item_id, False, reason)
                 else:
-                    log_fn(f"Downloaded: {file_name}")
-            elif cancelled:
-                break
-            else:
-                processed += 1
-                log_fn(f"WARNING: Failed to download {workshop_id} ({file_name})")
-                failed.append((file_name, item_url))
+                    failed.append(t)
+            if ctx.cancelled():
+                return
+            if start + size < len(pending) and ctx.polite_pause():
+                return
+        pending = failed
 
-        if cancelled:
-            break
 
-        if batch_index < batch_count - 1:
-            if _sleep_between_requests(pause, resume, log_fn, cancel_check):
-                log_fn("Download cancelled by user.")
-                cancelled = True
-                break
+def _is_permanent(reason: str) -> bool:
+    r = reason.lower()
+    return any(k in r for k in _OWNERSHIP_REASONS) or "file not found" in r
 
-    succeeded = processed - len(failed)
-    remaining = total - processed
-    if remaining > 0:
-        log_fn(
-            f"Download complete: {succeeded}/{processed} succeeded — "
-            f"{remaining} not started (cancelled)"
+
+# ---------------------------------------------------------------------------
+# SteamCMD
+# ---------------------------------------------------------------------------
+def _steamcmd_attempt(ctx: Context) -> AttemptFn:
+    username = ctx.settings.get("steam_username") or "anonymous"
+    stall = int(ctx.settings.get("stall_timeout_min", 20)) * 60
+    activity = [
+        os.path.join(archive.workshop_root(), "downloads", ctx.appid),
+        os.path.join(archive.workshop_root(), "temp", ctx.appid),
+    ]
+
+    def attempt(batch: list[Task]) -> dict[str, tuple[bool, str]]:
+        cmd = [config.STEAMCMD_PATH, "+force_install_dir", config.DOWNLOADS_DIR, "+login", username]
+        for t in batch:
+            cmd += ["+workshop_download_item", ctx.appid, t.item_id]
+        cmd.append("+quit")
+        ctx.log(
+            f"SteamCMD: {len(batch)} item(s) — "
+            + ", ".join(t.item_id for t in batch[:5]) + ("…" if len(batch) > 5 else "")
         )
+        try:
+            outcome = run_process(cmd, ctx, stall, activity, "steamcmd")
+        except OSError as exc:
+            ctx.log(f"ERROR: could not start SteamCMD: {exc}")
+            return {t.item_id: (False, str(exc)) for t in batch}
+
+        succeeded = set(_SC_SUCCESS_RE.findall("\n".join(outcome.lines)))
+        errors = {m.group(1): m.group(2) for m in map(_SC_ERROR_RE.search, outcome.lines) if m}
+        acf = archive.parse_acf(ctx.appid)
+        on_disk = archive.scan(ctx.appid)
+        results: dict[str, tuple[bool, str]] = {}
+        for t in batch:
+            present = t.item_id in on_disk
+            acf_time = acf.get(t.item_id, {}).get("timeupdated", 0)
+            fresh = t.time_updated == 0 or acf_time >= t.time_updated
+            inferred = fresh and not t.force and t.item_id not in errors and not outcome.cancelled and not outcome.stalled
+            if present and (t.item_id in succeeded or inferred):
+                results[t.item_id] = (True, "")
+            else:
+                reason = errors.get(t.item_id) or (
+                    "stalled" if outcome.stalled else "cancelled" if outcome.cancelled else "not downloaded"
+                )
+                results[t.item_id] = (False, reason)
+                if any(k in reason.lower() for k in _OWNERSHIP_REASONS) and username == "anonymous":
+                    ctx.hints.add(OWNERSHIP_HINT)
+        return results
+
+    return attempt
+
+
+# ---------------------------------------------------------------------------
+# DepotDownloader
+# ---------------------------------------------------------------------------
+_DD_ERROR_RE = re.compile(r"(AccessDenied|NoSubscription|Access Denied|Unable to download|Error|error)[^\n]*")
+
+
+def _depot_attempt(ctx: Context) -> AttemptFn:
+    username = ctx.settings.get("steam_username") or ""
+    stall = int(ctx.settings.get("stall_timeout_min", 20)) * 60
+
+    def attempt(batch: list[Task]) -> dict[str, tuple[bool, str]]:
+        results = {}
+        for t in batch:
+            if ctx.cancelled():
+                break
+            dest = os.path.join(archive.content_dir(ctx.appid), t.item_id)
+            existed = os.path.isdir(dest)
+            os.makedirs(dest, exist_ok=True)
+            cmd = [
+                config.DEPOTDOWNLOADER_PATH, "-app", ctx.appid, "-pubfile", t.item_id,
+                "-dir", dest, "-max-downloads", "8",
+            ]
+            if username:
+                cmd += ["-username", username, "-remember-password"]
+            ctx.log(f"DepotDownloader: {t.item_id} {t.title}".rstrip())
+            try:
+                outcome = run_process(cmd, ctx, stall, [dest], "depotdownloader")
+            except OSError as exc:
+                results[t.item_id] = (False, str(exc))
+                continue
+            has_files = any(n != ".DepotDownloader" for n in os.listdir(dest))
+            if outcome.returncode == 0 and has_files:
+                results[t.item_id] = (True, "")
+            else:
+                text = "\n".join(outcome.lines[-20:])
+                m = _DD_ERROR_RE.search(text)
+                reason = m.group(0).strip() if m else f"exit code {outcome.returncode}"
+                if outcome.stalled:
+                    reason = "stalled"
+                if not existed:  # don't leave a partial new item that looks archived
+                    shutil.rmtree(dest, ignore_errors=True)
+                if any(k in reason.lower() for k in _OWNERSHIP_REASONS) and not username:
+                    ctx.hints.add(OWNERSHIP_HINT)
+                results[t.item_id] = (False, reason)
+        return results
+
+    return attempt
+
+
+# ---------------------------------------------------------------------------
+# Direct HTTP (legacy single-file items that expose a file_url)
+# ---------------------------------------------------------------------------
+def _http_attempt(ctx: Context) -> AttemptFn:
+    def attempt(batch: list[Task]) -> dict[str, tuple[bool, str]]:
+        results = {}
+        for t in batch:
+            if ctx.cancelled():
+                break
+            base = archive.content_dir(ctx.appid)
+            os.makedirs(base, exist_ok=True)
+            fname = archive.safe_name(os.path.basename(t.filename.replace("\\", "/")), f"{t.item_id}.bin")
+            staging = tempfile.mkdtemp(prefix=f".{t.item_id}-", dir=base)
+            try:
+                ctx.log(f"HTTP: {t.item_id} {fname}")
+                safe_download(
+                    t.file_url, os.path.join(staging, fname), max_bytes=None, timeout=60,
+                    cancel_check=ctx.cancelled,
+                )
+                final = os.path.join(base, t.item_id)
+                if os.path.isdir(final):
+                    shutil.rmtree(final)
+                os.replace(staging, final)
+                results[t.item_id] = (True, "")
+            except (DownloadError, OSError) as exc:
+                results[t.item_id] = (False, str(exc))
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+        return results
+
+    return attempt
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def download(tasks: list[Task], ctx: Context) -> None:
+    """Download *tasks*, reporting each final outcome via ``ctx.on_result``."""
+    settings = ctx.settings
+    http_tasks = [t for t in tasks if settings.get("http_direct") and t.file_url]
+    rest = [t for t in tasks if t not in http_tasks]
+
+    if http_tasks:
+        ctx.log(f"Fetching {len(http_tasks)} legacy item(s) directly from Steam's CDN.")
+        _with_retries(http_tasks, _http_attempt(ctx), 1, ctx)
+    if not rest or ctx.cancelled():
+        return
+
+    backend = settings.get("download_backend", "steamcmd")
+    if backend == "depotdownloader":
+        if not config.depotdownloader_available():
+            _fail_all(rest, ctx, f"DepotDownloader not found at {config.DEPOTDOWNLOADER_PATH}")
+            return
+        _with_retries(rest, _depot_attempt(ctx), 1, ctx)
     else:
-        log_fn(f"Download complete: {succeeded}/{total} succeeded")
+        if not config.steamcmd_available():
+            _fail_all(rest, ctx, f"SteamCMD not found at {config.STEAMCMD_PATH}")
+            return
+        _with_retries(rest, _steamcmd_attempt(ctx), STEAMCMD_BATCH, ctx)
 
-    if failed:
-        log_fn(f"WARNING: {len(failed)} item(s) failed:")
-        for name, url in failed:
-            log_fn(f"  - {name} ({url})")
 
-    return len(failed) == 0
+def _fail_all(tasks: list[Task], ctx: Context, reason: str) -> None:
+    ctx.log(f"ERROR: {reason}")
+    for t in tasks:
+        ctx.on_result(t.item_id, False, reason)

@@ -39,6 +39,13 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Tag builds -> "2.0.0"; others -> "2.0.0-3-gabc1234" (or the bare sha before any v* tag).
+      - id: ver
+        run: echo "version=$(git describe --tags --match 'v*' --always | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -68,6 +75,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: APP_VERSION=${{ steps.meta.outputs.version }}
+          build-args: APP_VERSION=${{ steps.ver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

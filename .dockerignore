@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+.claude
+.ruff_cache
+.pytest_cache
+**/__pycache__
+meta
+downloads
+screenshots
+tests
+docs
+unraid
+*.md

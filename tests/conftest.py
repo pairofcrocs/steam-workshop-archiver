@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import config, db  # noqa: E402
+from app import config, db, jobs  # noqa: E402
 from app.core import steam_api  # noqa: E402
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -26,6 +26,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_HOSTS", ["*"])
     monkeypatch.setattr(steam_api, "fetch_app_name", lambda appid: "Test Game")
     monkeypatch.setattr(steam_api, "get_published_file_details", lambda ids, **kw: {})
+    # No background worker/scheduler in tests: runs execute only when a test drives them.
+    monkeypatch.setattr(jobs.manager, "start", lambda: None)
+    monkeypatch.setattr(jobs.manager, "current", None)
     db.init(str(meta / "archiver.db"))
     yield tmp_path
     db.close()
